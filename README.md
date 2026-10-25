@@ -1,8 +1,18 @@
-# CHOMPI Firmware Starter
+# CHOMPI Pitch Quiz
 
-A small starting point for a new CHOMPI firmware. This is not a copy of TAPE: it contains only the BOOT_SRAM build setup, the STM32H750 memory layout, and a four-channel audio pass-through smoke test.
+A beginner ear-training game for CHOMPI, using the Daisy Seed BOOT_SRAM build setup and STM32H750 memory layout.
 
-The example initializes the Daisy Seed and CHOMPI's external SAI codec, then routes each input channel to the matching output channel. It does not include instrument behavior, controls, LEDs, MIDI, SD-card support, presets, or battery management.
+## Playing
+
+Press **Play** to start (or restart) a ten-note beginner round. Listen to the generated triangle-wave note, then press the matching keyboard key after the reference finishes. Beginner targets are C4 through B4, using only the natural notes of C major.
+
+Each accepted key press plays your answer, followed by an ascending success tone or a descending failure tone. You have three attempts per target. After a miss, the target is replayed; after a correct answer or three misses, the game advances automatically.
+
+The ten black-key LEDs show completed questions from left to right: **green** for a correct answer within three attempts, **red** for three misses. Unfinished questions remain dark. Results stay visible at the end; press Play for another round. Holding a key does not consume additional attempts, and presses during sounds are ignored.
+
+Generated audio replaces the starter's input pass-through and is sent to all four codec output channels. MIDI, SD-card support, presets, and battery management are not implemented.
+
+Hardware mapping follows the [published CHOMPI TAPE firmware](https://github.com/CHOMPI-Club/CHOMPI/tree/a73d732613da684e4de844619b690776f0f50ccf/firmware/chompi-tape/code/src): the five active-low CD4021 registers use D7/D8/D9 (latch/clock/data), with Play at input 33. The keyboard's 25 GRB LEDs use D18/TIM3_CH2; black keys are LED indices 0–9. This project uses upstream libDaisy's raw shift-register states with local debouncing, not CHOMPI's modified libDaisy driver.
 
 ## Toolchain
 
@@ -32,8 +42,16 @@ make -C code/src -j4
 
 The BOOT_SRAM binary is written to `code/src/build/CHOMPI_STARTER.bin`. For a new project, change `TARGET` in the Makefile and replace or extend `chompi_main.cpp`.
 
-## Starting a new firmware
+## Native gameplay tests
 
-Use this directory as the root of a separate GitHub repository, enable **Template repository** in that repository's settings, then create new firmware repositories with **Use this template**. Keep the custom linker script unless you have revalidated the BOOT_SRAM memory layout and linker headroom for your firmware.
+The game and synthesizer can be checked without the hardware libraries or ARM toolchain:
+
+```sh
+g++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined \
+    code/tests/pitch_quiz_test.cpp -o /tmp/pitch_quiz_test
+/tmp/pitch_quiz_test
+```
+
+On-device verification still requires a CHOMPI: check audible reference/answer/feedback tones, held-key behavior, all ten LED positions, three-miss advancement, and Play restarting a round.
 
 The CHOMPI name and marks are not covered by the software license. Rename your firmware and avoid implying it is an official CHOMPI Club release; see [TRADEMARKS.md](TRADEMARKS.md).
