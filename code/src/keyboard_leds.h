@@ -1,6 +1,8 @@
 #pragma once
 
 #include "daisy_seed.h"
+#include "pitch_quiz.h"
+#include "quiz_display.h"
 #include "stm32h7xx_hal.h"
 
 namespace keyboard_leds
@@ -122,7 +124,11 @@ inline bool Show(uint32_t progress,
                  uint32_t pressed_keys,
                  uint32_t volume_percent,
                  bool show_volume_bar,
-                 uint8_t play_blue)
+                 uint8_t play_blue,
+                 unsigned current_level,
+                 bool shift_held,
+                 bool result_hold = false,
+                 uint32_t result_elapsed_ms = 0)
 {
     for(unsigned led = 0; led < 25; ++led)
     {
@@ -149,6 +155,22 @@ inline bool Show(uint32_t progress,
     for(unsigned key = 0; key < 25; ++key)
         if(pressed_keys & (1u << key))
             EncodeLed(&symbols[kPadding + kKeyLeds[key] * 24], 64, 64, 64);
+
+    if(result_hold)
+        for(unsigned led = 0; led < PitchQuiz::kRoundLength; ++led)
+        {
+            const auto color = quiz_display::ResultColor(progress, led, true, result_elapsed_ms);
+            EncodeLed(&symbols[kPadding + led * 24], color.red, color.green, color.blue);
+        }
+
+    if(shift_held)
+        for(unsigned led = 0; led < 10; ++led)
+        {
+            const uint8_t blue = led < PitchQuiz::kLevelCount
+                                     ? (led + 1 == current_level ? 64 : 8)
+                                     : 0;
+            EncodeLed(&symbols[kPadding + led * 24], 0, 0, blue);
+        }
 
     if(HAL_DMA_Start(&dma,
                      reinterpret_cast<uint32_t>(symbols),

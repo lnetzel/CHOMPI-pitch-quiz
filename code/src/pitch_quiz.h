@@ -10,16 +10,25 @@ class PitchQuiz
     static constexpr unsigned kMaxAttempts = 3;
     static constexpr unsigned kSampleRate = 48000;
     static constexpr float kReleaseSeconds = 0.5f;
+    static constexpr unsigned kLevelCount = 2;
 
-    enum class State { Idle, Prompt, Listening, Answer, Feedback, Pause };
+    enum class Level : unsigned { Natural = 1, Chromatic = 2 };
+    enum class State { Idle, Prompt, Listening, Answer, Feedback, Pause, LevelComplete };
     enum class Result { Pending, Correct, Wrong };
 
     void Start(uint32_t seed)
     {
         random_ = seed ? seed : 1;
-        progress_ = 0;
-        completed_ = 0;
-        NextNote();
+        ResetLevel();
+    }
+
+    bool StartLevel(unsigned level, uint32_t seed)
+    {
+        if(level == 0 || level > kLevelCount)
+            return false;
+        level_ = static_cast<Level>(level);
+        Start(seed);
+        return true;
     }
 
     void Press(unsigned note)
@@ -44,7 +53,7 @@ class PitchQuiz
             return 0.0f;
 
         float sample = 0.0f;
-        if(state_ != State::Pause)
+        if(state_ != State::Pause && state_ != State::LevelComplete)
         {
             const float elapsed = static_cast<float>(position_) / kSampleRate;
             float envelope = elapsed < 0.01f ? elapsed / 0.01f : 1.0f;
@@ -69,6 +78,7 @@ class PitchQuiz
     }
 
     State GetState() const { return state_; }
+    unsigned CurrentLevel() const { return static_cast<unsigned>(level_); }
     unsigned Target() const { return target_; }
     unsigned Attempts() const { return attempts_; }
     unsigned Completed() const { return completed_; }
@@ -81,6 +91,14 @@ class PitchQuiz
     }
 
   private:
+        void ResetLevel()
+        {
+                progress_ = 0;
+                completed_ = 0;
+                correct_ = false;
+                NextNote();
+        }
+
     static float Frequency(unsigned note)
     {
         return 440.0f * std::pow(2.0f, (static_cast<float>(note) - 69.0f) / 12.0f);
@@ -109,7 +127,9 @@ class PitchQuiz
         random_ ^= random_ << 13;
         random_ ^= random_ >> 17;
         random_ ^= random_ << 5;
-        target_ = notes[random_ % (sizeof(notes) / sizeof(notes[0]))];
+        target_ = level_ == Level::Natural
+                  ? notes[random_ % (sizeof(notes) / sizeof(notes[0]))]
+                  : 48 + random_ % 25;
         attempts_ = 0;
         Begin(State::Prompt, 0.7f, Frequency(target_), kReleaseSeconds);
     }
@@ -131,6 +151,9 @@ class PitchQuiz
                 Begin(State::Feedback, 0.23f, correct_ ? 660.0f : 220.0f, 0.12f);
                 break;
             case State::Feedback:
+                if(completed_ == kRoundLength && CurrentLevel() < kLevelCount)
+                    Begin(State::LevelComplete, 2.0f, 0.0f, 0.0f);
+                else
                     Begin(State::Pause, 0.3f, 0.0f, 0.0f);
                 break;
             case State::Pause:
@@ -141,12 +164,17 @@ class PitchQuiz
                 else
                     Begin(State::Prompt, 0.7f, Frequency(target_));
                 break;
+            case State::LevelComplete:
+                level_ = static_cast<Level>(CurrentLevel() + 1);
+                ResetLevel();
+                break;
             default:
                 break;
         }
     }
 
     State state_ = State::Idle;
+    Level level_ = Level::Natural;
     uint32_t random_ = 1;
     uint32_t progress_ = 0;
     unsigned completed_ = 0;

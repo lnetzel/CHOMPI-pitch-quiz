@@ -2,6 +2,7 @@
 #include "dev/sr_4021.h"
 #include "keyboard_leds.h"
 #include "pitch_quiz.h"
+#include "quiz_controls.h"
 
 #include <atomic>
 
@@ -13,11 +14,11 @@ DaisySeed board;
 SaiHandle external_sai_handle;
 ShiftRegister4021<5> buttons;
 PitchQuiz quiz;
-std::atomic<uint32_t> progress{0};
+std::atomic<uint32_t> ui_snapshot{1u << quiz_controls::kLevelShift};
 std::atomic<uint32_t> pressed_keys{0};
 std::atomic<uint32_t> volume_percent{25};
 std::atomic<uint32_t> volume_bar_until{0};
-std::atomic<bool> game_active{false};
+bool shift_held = false;
 static_assert(ATOMIC_INT_LOCK_FREE == 2, "Audio requires lock-free progress updates");
 
 struct VolumeEncoder
@@ -61,11 +62,6 @@ VolumeEncoder volume_encoder;
 
 void ScanControls()
 {
-    // Ascending C3..C5, from CHOMPI TAPE hardware.h / NormalPage.h.
-    static constexpr unsigned keys[] = {
-        15, 7, 8, 12, 9, 10, 13, 11, 14, 16, 21, 17, 18,
-        22, 19, 23, 20, 24, 29, 25, 30, 26, 31, 27, 28
-    };
     static uint8_t history[40] = {};
     static bool held[40] = {};
     bool rising[40] = {};
@@ -83,16 +79,12 @@ void ScanControls()
     }
     uint32_t key_mask = 0;
     for(unsigned key = 0; key < 25; ++key)
-        if(held[keys[key]])
+        if(held[quiz_controls::kKeySwitches[key]])
             key_mask |= 1u << key;
     pressed_keys.store(key_mask, std::memory_order_relaxed);
 
-    if(rising[33] || rising[34])
-        quiz.Start(System::GetNow());
-    else
-        for(unsigned key = 0; key < 25; ++key)
-            if(rising[keys[key]])
-                quiz.Press(key + 48);
+    shift_held = held[quiz_controls::kShiftSwitch];
+    quiz_controls::Process(quiz, rising, shift_held, System::GetNow());
 
     const int turn = volume_encoder.Update();
     if(turn != 0)
@@ -127,9 +119,7 @@ void AudioCallback(AudioHandle::InputBuffer,
         for(size_t channel = 0; channel < 4; ++channel)
             output[channel][frame] = sample;
     }
-    progress.store(quiz.Progress(), std::memory_order_relaxed);
-    game_active.store(quiz.GetState() != PitchQuiz::State::Idle,
-                      std::memory_order_relaxed);
+    ui_snapshot.store(quiz_controls::PackUi(quiz, shift_held), std::memory_order_relaxed);
 }
 
 void InitExternalAudio()
@@ -170,35 +160,57 @@ int main()
     volume_encoder.Init(seed::D15, seed::D17);
     quiz.SetVolume(0.25f);
     keyboard_leds::Init();
-    keyboard_leds::Show(0, 0, 25, false, 6);
+    keyboard_leds::Show(0, 0, 25, false, 6, 1, false);
     board.StartAudio(AudioCallback);
 
-    uint32_t displayed = 0;
+    uint32_t displayed = 1u << quiz_controls::kLevelShift;
     uint32_t displayed_keys = 0;
     uint32_t displayed_volume = 25;
     bool displayed_volume_bar = false;
     uint8_t displayed_play_blue = 6;
+    bool was_result_hold = false;
+    uint32_t result_started_at = 0;
+    uint32_t displayed_result_frame = 0;
     while(true)
     {
-        const uint32_t current = progress.load(std::memory_order_relaxed);
+        const uint32_t current = ui_snapshot.load(std::memory_order_relaxed);
+        const uint32_t progress = current & quiz_controls::kProgressMask;
+        const unsigned level = (current >> quiz_controls::kLevelShift) & 15;
+        const bool show_levels = (current & quiz_controls::kShiftHeldMask) != 0;
+        const bool result_hold = (current & quiz_controls::kResultHoldMask) != 0;
+        const uint32_t now = System::GetNow();
+        if(result_hold && !was_result_hold)
+            result_started_at = now;
+        was_result_hold = result_hold;
+        const uint32_t result_elapsed_ms = result_hold ? now - result_started_at : 0;
+        const uint32_t result_frame = result_hold ? result_elapsed_ms / 33 + 1 : 0;
         const uint32_t keys = pressed_keys.load(std::memory_order_relaxed);
         const uint32_t volume = volume_percent.load(std::memory_order_relaxed);
         const uint32_t until = volume_bar_until.load(std::memory_order_relaxed);
         const bool show_volume_bar = static_cast<int32_t>(until - System::GetNow()) > 0;
-        const bool active = game_active.load(std::memory_order_relaxed);
+        const bool active = (current & quiz_controls::kActiveMask) != 0;
         const uint32_t pulse_phase = System::GetNow() % 2000;
         const uint32_t pulse = pulse_phase < 1000 ? pulse_phase : 2000 - pulse_phase;
         const uint8_t play_blue = active ? 64 : static_cast<uint8_t>(6 + pulse * 14 / 1000);
         if((current != displayed || keys != displayed_keys
             || volume != displayed_volume || show_volume_bar != displayed_volume_bar
-            || play_blue != displayed_play_blue)
-           && keyboard_leds::Show(current, keys, volume, show_volume_bar, play_blue))
+            || play_blue != displayed_play_blue || result_frame != displayed_result_frame)
+           && keyboard_leds::Show(progress,
+                                  keys,
+                                  volume,
+                                  show_volume_bar,
+                                  play_blue,
+                                  level,
+                                  show_levels,
+                                  result_hold,
+                                  result_elapsed_ms))
         {
             displayed = current;
             displayed_keys = keys;
             displayed_volume = volume;
             displayed_volume_bar = show_volume_bar;
             displayed_play_blue = play_blue;
+            displayed_result_frame = result_frame;
         }
         System::Delay(1);
     }
