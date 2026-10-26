@@ -4,7 +4,17 @@ A two-level ear-training game for CHOMPI, using the Daisy Seed BOOT_SRAM build s
 
 ## Playing
 
-Press **Play** to start a ten-question level. Listen to the generated triangle-wave note, then press the matching keyboard key after the reference finishes. The game boots on **Level 1**, using all 15 natural notes from C3 through C5. **Level 2** uses all 25 notes in the same range, including the black keys.
+Before pressing **Play**, the keyboard is a six-voice instrument: notes sustain while held and release over 500 ms. Free play is also available after the final level ends. Starting or selecting a level silences free-play voices; during a level, the keyboard remains dedicated to quiz answers. Holding SHIFT silences free-play voices, and held keys must be released and pressed again to sound afterward. A seventh note steals a releasing voice first, otherwise the oldest held voice.
+
+Press **Play** to start a ten-question level. Listen to the generated note, then press the matching keyboard key after the reference finishes. The game boots on **Level 1**, using all 15 natural notes from C3 through C5. **Level 2** uses all 25 notes in the same range, including the black keys.
+
+Turn **physical encoder 1** (the leftmost upper knob, SW4 / ENC_4) to select **Triangle**, **Saw**, or **Square**, in that order. Triangle is the boot default. Selection stops at either end rather than wrapping. The waveform applies immediately to quiz reference, answer and feedback tones, and to all free-play voices, including held notes. White-key LEDs show the selected group for 500 ms, with all other white-key LEDs dark:
+
+- White keys **1-5**: Triangle.
+- White keys **6-10**: Saw.
+- White keys **11-15**: Square.
+
+The most recently turned knob selects whether the white keys temporarily show waveform or volume. Normal held-key lighting returns when that display expires. Saw and square use DaisySP's band-limited oscillators.
 
 After Level 1's final feedback, a two-second result animation plays, then Level 2 starts automatically regardless of score. During every inter-level hold, scores of 9/10 or less blink the green/red results together; a perfect 10/10 instead shows an animated rainbow across the ten result LEDs. Held keys do not override this animation, but SHIFT still shows the level selector. Level 2 stops after ten questions and leaves its results visible. Play or Loop restarts the current level from question 1 and clears its results without changing volume.
 
@@ -51,14 +61,22 @@ The BOOT_SRAM binary is written to `code/src/build/CHOMPI_Pitch_Quiz_V1.0.bin`. 
 
 ## Native gameplay tests
 
-The game and synthesizer can be checked without the hardware libraries or ARM toolchain:
+The game and synthesizer can be checked without libDaisy or the ARM toolchain. The tests compile DaisySP's oscillator directly; compile this unchanged third-party source separately so project code can retain strict warning checks:
 
 ```sh
-g++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined \
-    code/tests/pitch_quiz_test.cpp -o /tmp/pitch_quiz_test
+g++ -std=c++14 -Icode/libs/DaisySP/Source \
+    -Icode/libs/DaisySP/Source/Utility \
+    -c code/libs/DaisySP/Source/Synthesis/oscillator.cpp \
+    -o /tmp/quiz_oscillator.o
+g++ -std=c++14 -Wall -Wextra -Werror \
+    -isystem code/libs/DaisySP/Source \
+    code/tests/pitch_quiz_test.cpp /tmp/quiz_oscillator.o \
+    -o /tmp/pitch_quiz_test
 /tmp/pitch_quiz_test
 ```
 
-On-device verification still requires a CHOMPI: check audible reference/answer/feedback tones, both target ranges, automatic Level 1-to-2 progression, SHIFT level selection and restored results, held-key behavior, all ten LED positions, three-miss advancement, and Play/Loop restarting the current level. Confirm the volume LED stays on its own encoder and the SHIFT panel LED stays dark.
+On MSYS2, prepend `/ucrt64/bin` to `PATH` for native tests. Where available, add `-fsanitize=address,undefined` to both compilation steps; those runtimes are not installed on the current Windows setup.
+
+On-device verification still requires a CHOMPI: check six-note chords, release tails, voice stealing, encoder 1 direction and all three waveform LED groups, live waveform changes, audible reference/answer/feedback tones, both target ranges, automatic Level 1-to-2 progression, SHIFT level selection and restored results, held-key behavior, all ten LED positions, three-miss advancement, and Play/Loop restarting the current level. Confirm the volume LED stays on its own encoder and the SHIFT panel LED stays dark.
 
 The CHOMPI name and marks are not covered by the software license. Rename your firmware and avoid implying it is an official CHOMPI Club release; see [TRADEMARKS.md](TRADEMARKS.md).

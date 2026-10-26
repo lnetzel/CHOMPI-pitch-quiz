@@ -11,6 +11,14 @@ struct Color
     uint8_t blue;
 };
 
+inline Color WaveformColor(unsigned white_key, unsigned waveform)
+{
+    if(white_key < 15 && waveform < quiz_synth::kWaveformCount
+       && white_key / 5 == waveform)
+        return {48, 48, 48};
+    return {0, 0, 0};
+}
+
 inline Color ResultColor(uint32_t progress,
                          unsigned led,
                          bool result_hold,

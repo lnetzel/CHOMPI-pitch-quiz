@@ -237,8 +237,145 @@ void CheckResultAnimations()
     assert(white_key.red == 0 && white_key.green == 0 && white_key.blue == 0);
 }
 
+void CheckWaveforms()
+{
+    float energies[3] = {};
+    for(unsigned index = 0; index < quiz_synth::kWaveformCount; ++index)
+    {
+        PitchQuiz quiz;
+        const auto waveform = static_cast<quiz_synth::Waveform>(index);
+        quiz.SetWaveform(waveform);
+        quiz.Start(123);
+        assert(quiz.Waveform() == waveform);
+        for(unsigned sample = 0; sample < PitchQuiz::kSampleRate / 2; ++sample)
+        {
+            const float output = quiz.Process();
+            assert(std::isfinite(output));
+            assert(std::fabs(output) <= 0.22f);
+            energies[index] += output * output;
+        }
+        assert(energies[index] > 1.0f);
+        quiz.SetWaveform(static_cast<quiz_synth::Waveform>(99));
+        assert(quiz.Waveform() == waveform);
+    }
+    assert(std::fabs(energies[2] - energies[0]) > 0.5f);
+}
+
+void CheckFreePlay()
+{
+    for(unsigned waveform = 0; waveform < quiz_synth::kWaveformCount; ++waveform)
+    {
+        quiz_synth::FreePlay synth;
+        synth.SetWaveform(static_cast<quiz_synth::Waveform>(waveform));
+        synth.NoteOn(128);
+        assert(synth.ActiveVoices() == 0);
+        for(unsigned note = 60; note < 66; ++note)
+            synth.NoteOn(note);
+        assert(synth.ActiveVoices() == 6);
+        for(unsigned sample = 0; sample < 48000; ++sample)
+        {
+            const float output = synth.Process();
+            assert(std::isfinite(output) && std::fabs(output) <= 0.22001f);
+        }
+        synth.NoteOn(66);
+        assert(synth.ActiveVoices() == 6);
+        assert(!synth.IsHeld(60) && synth.IsHeld(66));
+        synth.NoteOff(60);
+        assert(synth.IsHeld(66));
+        for(unsigned note = 61; note <= 66; ++note)
+            synth.NoteOff(note);
+        for(unsigned sample = 0; sample < quiz_synth::FreePlay::kReleaseSamples - 1; ++sample)
+            synth.Process();
+        assert(synth.ActiveVoices() == 6);
+        synth.Process();
+        assert(synth.ActiveVoices() == 0);
+        assert(synth.Process() == 0.0f);
+    }
+
+    PitchQuiz quiz;
+    quiz.NoteOn(60);
+    float energy = 0.0f;
+    for(unsigned sample = 0; sample < 4800; ++sample)
+        energy += std::fabs(quiz.Process());
+    assert(energy > 1.0f);
+    assert(quiz.GetState() == PitchQuiz::State::Idle && quiz.Attempts() == 0);
+    quiz.SetWaveform(quiz_synth::Waveform::Saw);
+    quiz.Start(123);
+    assert(quiz.Waveform() == quiz_synth::Waveform::Saw);
+    FinishSounds(quiz);
+    assert(quiz.Process() == 0.0f);
+    quiz.NoteOn(60);
+    assert(quiz.Process() == 0.0f);
+}
+
+void CheckKeyboardAndWaveformControls()
+{
+    quiz_controls::ShiftEncoder encoder;
+    for(unsigned sample = 0; sample < 4; ++sample)
+        encoder.Update(false, false);
+    assert(encoder.Update(true, false) == 0);
+    assert(encoder.Update(false, false) == 0);
+    assert(encoder.Update(false, false) == 1);
+    assert(encoder.Update(false, true) == 0);
+    assert(encoder.Update(false, false) == 0);
+    assert(encoder.Update(false, false) == -1);
+    for(unsigned waveform = 0; waveform < 3; ++waveform)
+        for(unsigned white = 0; white < 15; ++white)
+        {
+            const auto color = quiz_display::WaveformColor(white, waveform);
+            const unsigned expected = white / 5 == waveform ? 48 : 0;
+            assert(color.red == expected && color.green == expected && color.blue == expected);
+        }
+
+    PitchQuiz quiz;
+    bool rising[40] = {};
+    bool falling[40] = {};
+    rising[15] = true;
+    quiz_controls::Process(quiz, rising, false, 1, falling);
+    rising[15] = false;
+    float energy = 0.0f;
+    for(unsigned sample = 0; sample < 4800; ++sample)
+        energy += std::fabs(quiz.Process());
+    assert(energy > 1.0f);
+    falling[15] = true;
+    quiz_controls::Process(quiz, rising, false, 2, falling);
+    falling[15] = false;
+    for(unsigned sample = 0; sample < quiz_synth::FreePlay::kReleaseSamples; ++sample)
+        quiz.Process();
+    assert(quiz.Process() == 0.0f);
+
+    rising[15] = true;
+    quiz_controls::Process(quiz, rising, false, 3, falling);
+    rising[15] = false;
+    quiz_controls::Process(quiz, rising, true, 4, falling);
+    assert(quiz.Process() == 0.0f);
+    quiz_controls::Process(quiz, rising, false, 5, falling);
+    assert(quiz.Process() == 0.0f);
+
+    quiz_controls::TurnWaveform(quiz, -1);
+    assert(quiz.Waveform() == quiz_synth::Waveform::Triangle);
+    quiz_controls::TurnWaveform(quiz, 1);
+    assert(quiz.Waveform() == quiz_synth::Waveform::Saw);
+    quiz_controls::TurnWaveform(quiz, 1);
+    quiz_controls::TurnWaveform(quiz, 1);
+    assert(quiz.Waveform() == quiz_synth::Waveform::Square);
+    const auto ui = quiz_controls::PackUi(quiz, false);
+    assert(((ui >> quiz_controls::kWaveformShift) & 3) == 2);
+    assert((ui & quiz_controls::kActiveMask) == 0);
+    rising[quiz_controls::kPlaySwitch] = true;
+    quiz_controls::Process(quiz, rising, false, 6, falling);
+    assert(quiz.GetState() == PitchQuiz::State::Prompt);
+    assert(quiz.Waveform() == quiz_synth::Waveform::Square);
+    quiz_controls::TurnWaveform(quiz, -1);
+    assert(quiz.Waveform() == quiz_synth::Waveform::Saw);
+    assert(quiz.GetState() == PitchQuiz::State::Prompt);
+}
+
 int main()
 {
+    CheckKeyboardAndWaveformControls();
+    CheckFreePlay();
+    CheckWaveforms();
     CheckResultAnimations();
     CheckControlRouting();
     CheckLevelRestarts();

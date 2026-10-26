@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include "quiz_synth.h"
 
 class PitchQuiz
 {
@@ -18,6 +19,7 @@ class PitchQuiz
 
     void Start(uint32_t seed)
     {
+        free_play_.Clear();
         random_ = seed ? seed : 1;
         ResetLevel();
     }
@@ -47,9 +49,31 @@ class PitchQuiz
 
     float Volume() const { return volume_; }
 
+    void NoteOn(unsigned note)
+    {
+        if(state_ == State::Idle)
+            free_play_.NoteOn(note);
+    }
+
+    void NoteOff(unsigned note) { free_play_.NoteOff(note); }
+    void StopFreePlay() { free_play_.Clear(); }
+
+    void SetWaveform(quiz_synth::Waveform waveform)
+    {
+        if(static_cast<unsigned>(waveform) >= quiz_synth::kWaveformCount)
+            return;
+        waveform_ = waveform;
+        oscillator_.SetWaveform(waveform);
+        free_play_.SetWaveform(waveform);
+    }
+
+    quiz_synth::Waveform Waveform() const { return waveform_; }
+
     float Process()
     {
-        if(state_ == State::Idle || state_ == State::Listening)
+        if(state_ == State::Idle)
+            return volume_ * free_play_.Process();
+        if(state_ == State::Listening)
             return 0.0f;
 
         float sample = 0.0f;
@@ -65,11 +89,8 @@ class PitchQuiz
                 const float fraction = static_cast<float>(position_) / length_;
                 frequency *= correct_ ? (1.0f + fraction) : (1.0f - 0.5f * fraction);
             }
-            phase_ += frequency / kSampleRate;
-            if(phase_ >= 1.0f)
-                phase_ -= 1.0f;
             sample = 0.22f * volume_ * envelope
-                     * (1.0f - 4.0f * std::fabs(phase_ - 0.5f));
+                     * oscillator_.Process(frequency);
         }
 
         if(++position_ >= length_)
@@ -115,7 +136,7 @@ class PitchQuiz
         release_length_ = static_cast<unsigned>(release_seconds * kSampleRate);
         length_ = sustain_length_ + release_length_;
         frequency_ = frequency;
-        phase_ = 0.0f;
+        oscillator_.Reset();
     }
 
     void NextNote()
@@ -185,7 +206,9 @@ class PitchQuiz
     unsigned sustain_length_ = 0;
     unsigned release_length_ = 0;
     float frequency_ = 0.0f;
-    float phase_ = 0.0f;
+    quiz_synth::Oscillator oscillator_;
+    quiz_synth::FreePlay free_play_;
+    quiz_synth::Waveform waveform_ = quiz_synth::Waveform::Triangle;
     float volume_ = 0.25f;
     bool correct_ = false;
 };

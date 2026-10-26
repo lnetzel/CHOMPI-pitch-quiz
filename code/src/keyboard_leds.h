@@ -128,7 +128,9 @@ inline bool Show(uint32_t progress,
                  unsigned current_level,
                  bool shift_held,
                  bool result_hold = false,
-                 uint32_t result_elapsed_ms = 0)
+                 uint32_t result_elapsed_ms = 0,
+                 bool show_waveform = false,
+                 unsigned waveform = 0)
 {
     for(unsigned led = 0; led < 25; ++led)
     {
@@ -155,6 +157,14 @@ inline bool Show(uint32_t progress,
     for(unsigned key = 0; key < 25; ++key)
         if(pressed_keys & (1u << key))
             EncodeLed(&symbols[kPadding + kKeyLeds[key] * 24], 64, 64, 64);
+
+    if(show_waveform)
+        for(unsigned white = 0; white < 15; ++white)
+        {
+            const auto color = quiz_display::WaveformColor(white, waveform);
+            EncodeLed(&symbols[kPadding + kWhiteKeyLeds[white] * 24],
+                      color.red, color.green, color.blue);
+        }
 
     if(result_hold)
         for(unsigned led = 0; led < PitchQuiz::kRoundLength; ++led)
