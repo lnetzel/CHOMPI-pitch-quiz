@@ -239,6 +239,62 @@ void CheckResultAnimations()
     assert(white_key.red == 0 && white_key.green == 0 && white_key.blue == 0);
 }
 
+void CheckWaveformLowPass()
+{
+    const uint8_t raw_waveforms[] = {
+        daisysp::Oscillator::WAVE_TRI,
+        daisysp::Oscillator::WAVE_POLYBLEP_SAW,
+        daisysp::Oscillator::WAVE_POLYBLEP_SQUARE
+    };
+    for(unsigned waveform = 0; waveform < quiz_synth::kWaveformCount; ++waveform)
+    {
+        for(float frequency : {130.8128f, 440.0f, 523.2511f})
+        {
+            quiz_synth::Oscillator filtered;
+            filtered.SetWaveform(static_cast<quiz_synth::Waveform>(waveform));
+            daisysp::Oscillator raw{};
+            raw.Init(48000.0f);
+            raw.SetAmp(1.0f);
+            raw.SetFreq(frequency);
+            raw.SetWaveform(raw_waveforms[waveform]);
+            float raw_energy = 0.0f;
+            float filtered_energy = 0.0f;
+            float raw_difference = 0.0f;
+            float filtered_difference = 0.0f;
+            float previous_raw = 0.0f;
+            float previous_filtered = 0.0f;
+            for(unsigned sample = 0; sample < 24000; ++sample)
+            {
+                const float original = raw.Process();
+                const float output = filtered.Process(frequency);
+                assert(std::isfinite(output) && std::fabs(output) <= 1.00001f);
+                if(waveform == 0)
+                    assert(output == original);
+                if(sample > 4096)
+                {
+                    raw_energy += original * original;
+                    filtered_energy += output * output;
+                    raw_difference += (original - previous_raw) * (original - previous_raw);
+                    filtered_difference += (output - previous_filtered) * (output - previous_filtered);
+                }
+                previous_raw = original;
+                previous_filtered = output;
+            }
+            if(waveform != 0)
+            {
+                assert(filtered_difference < raw_difference * 0.5f);
+                assert(filtered_energy > raw_energy * 0.4f);
+                assert(filtered_energy < raw_energy);
+            }
+            filtered.Reset();
+            const float restarted = filtered.Process(frequency);
+            quiz_synth::Oscillator fresh;
+            fresh.SetWaveform(static_cast<quiz_synth::Waveform>(waveform));
+            assert(restarted == fresh.Process(frequency));
+        }
+    }
+}
+
 void CheckWaveforms()
 {
     float energies[3] = {};
@@ -461,6 +517,7 @@ void CheckTargetRange()
 
 int main()
 {
+    CheckWaveformLowPass();
     CheckTargetRange();
     CheckKeyboardAndWaveformControls();
     CheckFreePlay();

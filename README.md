@@ -14,7 +14,7 @@ Turn **physical encoder 1** (the leftmost upper knob, SW4 / ENC_4) to select **T
 - White keys **6-10**: Saw.
 - White keys **11-15**: Square.
 
-Encoder 1's panel LED (LED2 / PTH 1) stays white. Saw and square use DaisySP's band-limited oscillators.
+Encoder 1's panel LED (LED2 / PTH 1) stays white. Saw and square use DaisySP's band-limited oscillators with a gentle two-stage 2 kHz low-pass for a softer sound, both in free play and during the quiz. Triangle bypasses the filter and retains its original sound.
 
 Turn **physical encoder 2** (the second upper knob, SW1 / ENC_1) to set the next-target **range**, from **1 to 15**, starting at **5** after boot. Its panel LED (LED3 / PTH 2) stays red. Range counts white-key steps in Level 1 (including adjacent E-F and B-C) and semitones in Level 2. Each new target is chosen within that many steps above or below the previous target, clipped to C3-C5 without wrapping. Repeating the previous target is allowed. The first target of each level is unrestricted. Changing range affects the next new target, not the current prompt or its retries; range survives level changes and restarts and does not restrict free play.
 
@@ -65,21 +65,24 @@ The BOOT_SRAM binary is written to `code/src/build/CHOMPI_Pitch_Quiz_V1.0.bin`. 
 
 ## Native gameplay tests
 
-The game and synthesizer can be checked without libDaisy or the ARM toolchain. The tests compile DaisySP's oscillator directly; compile this unchanged third-party source separately so project code can retain strict warning checks:
+The game and synthesizer can be checked without libDaisy or the ARM toolchain. The tests compile DaisySP's oscillator and low-pass filter directly; compile these unchanged third-party sources separately so project code can retain strict warning checks:
 
 ```sh
 g++ -std=c++14 -Icode/libs/DaisySP/Source \
     -Icode/libs/DaisySP/Source/Utility \
     -c code/libs/DaisySP/Source/Synthesis/oscillator.cpp \
     -o /tmp/quiz_oscillator.o
+g++ -std=c++14 -Icode/libs/DaisySP/Source/Utility \
+    -c code/libs/DaisySP/Source/Filters/tone.cpp \
+    -o /tmp/quiz_tone.o
 g++ -std=c++14 -Wall -Wextra -Werror \
     -isystem code/libs/DaisySP/Source \
-    code/tests/pitch_quiz_test.cpp /tmp/quiz_oscillator.o \
+    code/tests/pitch_quiz_test.cpp /tmp/quiz_oscillator.o /tmp/quiz_tone.o \
     -o /tmp/pitch_quiz_test
 /tmp/pitch_quiz_test
 ```
 
-On MSYS2, prepend `/ucrt64/bin` to `PATH` for native tests. Where available, add `-fsanitize=address,undefined` to both compilation steps; those runtimes are not installed on the current Windows setup.
+On MSYS2, prepend `/ucrt64/bin` to `PATH` for native tests. Where available, add `-fsanitize=address,undefined` to all compilation/link steps; those runtimes are not installed on the current Windows setup.
 
 On-device verification still requires a CHOMPI: check six-note chords, release tails, voice stealing, encoder 1 direction and all three waveform LED groups, live waveform changes, audible reference/answer/feedback tones, both target ranges, automatic Level 1-to-2 progression, SHIFT level selection and restored results, held-key behavior, all ten LED positions, three-miss advancement, and Play/Loop restarting the current level. Confirm the volume LED stays on its own encoder and the SHIFT panel LED stays dark.
 

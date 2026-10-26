@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Synthesis/oscillator.h"
+#include "Filters/tone.h"
 #include <cmath>
 
 namespace quiz_synth
@@ -16,6 +17,7 @@ class Oscillator
         oscillator_.Init(48000.0f);
         oscillator_.SetAmp(1.0f);
         SetWaveform(Waveform::Triangle);
+        Reset();
     }
 
     void SetWaveform(Waveform waveform)
@@ -27,19 +29,34 @@ class Oscillator
         };
         const unsigned index = static_cast<unsigned>(waveform);
         if(index < kWaveformCount)
+        {
             oscillator_.SetWaveform(waveforms[index]);
+            waveform_ = waveform;
+        }
     }
 
-    void Reset() { oscillator_.Reset(); }
+    void Reset()
+    {
+        oscillator_.Reset();
+        for(auto& filter : lowpass_)
+        {
+            filter.Init(48000.0f);
+            filter.SetFreq(2000.0f);
+        }
+    }
 
     float Process(float frequency)
     {
         oscillator_.SetFreq(frequency);
-        return oscillator_.Process();
+        const float sample = oscillator_.Process();
+        const float softened = lowpass_[1].Process(lowpass_[0].Process(sample));
+        return waveform_ == Waveform::Triangle ? sample : softened;
     }
 
   private:
     daisysp::Oscillator oscillator_{};
+    daisysp::Tone lowpass_[2];
+    Waveform waveform_ = Waveform::Triangle;
 };
 
 class FreePlay
