@@ -37,9 +37,9 @@ bool IsNaturalNote(unsigned note)
     }
 }
 
-void VerifyLevelTransition(PitchQuiz& quiz)
+void VerifyLevelCompletion(PitchQuiz& quiz)
 {
-    assert(quiz.CurrentLevel() == 1);
+    const unsigned selected_level = quiz.CurrentLevel();
     assert(quiz.GetState() == PitchQuiz::State::LevelComplete);
     const uint32_t results = quiz.Progress();
     const unsigned selected_range = quiz.Range();
@@ -51,13 +51,25 @@ void VerifyLevelTransition(PitchQuiz& quiz)
     quiz.Press(quiz.Target());
     assert(quiz.Progress() == results);
     assert(quiz.Process() == 0.0f);
-    assert(quiz.CurrentLevel() == 2);
+    assert(quiz.CurrentLevel() == selected_level);
     assert(quiz.Range() == selected_range);
-    assert(quiz.GetState() == PitchQuiz::State::Prompt);
-    assert(quiz.Completed() == 0 && quiz.Attempts() == 0);
+    assert(quiz.GetState() == PitchQuiz::State::Idle);
+    assert(quiz.Completed() == PitchQuiz::kRoundLength);
     assert((quiz_controls::PackUi(quiz, false) & quiz_controls::kResultHoldMask) == 0);
-    assert(quiz.Progress() == 0);
+    assert((quiz_controls::PackUi(quiz, false) & quiz_controls::kActiveMask) == 0);
+    assert(quiz.Progress() == results);
     assert(quiz.Volume() == 0.25f);
+
+    quiz.NoteOn(60);
+    float energy = 0.0f;
+    for(unsigned sample = 0; sample < 4800; ++sample)
+        energy += std::fabs(quiz.Process());
+    assert(energy > 1.0f);
+    assert(quiz.Progress() == results);
+    quiz.NoteOff(60);
+    for(unsigned sample = 0; sample < quiz_synth::FreePlay::kReleaseSamples; ++sample)
+        quiz.Process();
+    assert(quiz.Process() == 0.0f);
 }
 
 void CheckControlRouting()
@@ -92,15 +104,22 @@ void CheckControlRouting()
     assert(quiz.Attempts() == 1);
     rising[15] = false;
 
-    for(unsigned restart : {quiz_controls::kPlaySwitch, quiz_controls::kLoopSwitch})
+    for(unsigned button : {quiz_controls::kPlaySwitch, quiz_controls::kLoopSwitch})
     {
-        rising[restart] = true;
+        rising[button] = true;
         quiz_controls::Process(quiz, rising, false, 456);
-        rising[restart] = false;
+        rising[button] = false;
         assert(quiz.CurrentLevel() == 2);
-        assert(quiz.Completed() == 0 && quiz.Attempts() == 0);
-        assert(quiz.GetState() == PitchQuiz::State::Prompt);
+        assert(quiz.Completed() == 0 && quiz.Attempts() == 1);
+        assert(quiz.GetState() == PitchQuiz::State::Answer);
     }
+    FinishSounds(quiz);
+    const unsigned replay_target = quiz.Target();
+    rising[quiz_controls::kLoopSwitch] = true;
+    quiz_controls::Process(quiz, rising, false, 456);
+    rising[quiz_controls::kLoopSwitch] = false;
+    assert(quiz.GetState() == PitchQuiz::State::Prompt);
+    assert(quiz.Attempts() == 1 && quiz.Target() == replay_target);
     rising[7] = true;
     rising[12] = true;
     rising[quiz_controls::kPlaySwitch] = true;
@@ -323,6 +342,29 @@ void CheckFreePlay()
 {
     for(unsigned waveform = 0; waveform < quiz_synth::kWaveformCount; ++waveform)
     {
+        quiz_synth::FreePlay retrigger;
+        retrigger.SetWaveform(static_cast<quiz_synth::Waveform>(waveform));
+        retrigger.NoteOn(60);
+        float previous = 0.0f;
+        for(unsigned sample = 0; sample < 3000; ++sample)
+            previous = retrigger.Process();
+        retrigger.NoteOff(60);
+        retrigger.NoteOn(60);
+        assert(std::fabs(retrigger.Process() - previous) < 0.0001f);
+
+        quiz_synth::FreePlay stolen;
+        stolen.SetWaveform(static_cast<quiz_synth::Waveform>(waveform));
+        stolen.NoteOn(60);
+        for(unsigned note = 61; note < 66; ++note)
+            stolen.NoteOn(note);
+        for(unsigned sample = 0; sample < 3000; ++sample)
+            previous = stolen.Process();
+        stolen.NoteOn(67);
+        assert(std::fabs(stolen.Process() - previous) < 0.004f);
+    }
+
+    for(unsigned waveform = 0; waveform < quiz_synth::kWaveformCount; ++waveform)
+    {
         quiz_synth::FreePlay synth;
         synth.SetWaveform(static_cast<quiz_synth::Waveform>(waveform));
         synth.NoteOn(128);
@@ -511,12 +553,207 @@ void CheckTargetRange()
         bounds.Press(bounds.Target());
         FinishSounds(bounds);
     }
-    VerifyLevelTransition(bounds);
+    VerifyLevelCompletion(bounds);
     assert(bounds.Range() == 8);
+}
+
+void CheckEveryLevelCompletion()
+{
+    for(unsigned level = 1; level <= PitchQuiz::kLevelCount; ++level)
+        for(unsigned score : {0u, 9u, 10u})
+        {
+            PitchQuiz quiz;
+            assert(quiz.StartLevel(level, 123));
+            FinishSounds(quiz);
+            for(unsigned question = 0; question < PitchQuiz::kRoundLength; ++question)
+            {
+                if(question < score)
+                    quiz.Press(quiz.Target());
+                else
+                    for(unsigned attempt = 0; attempt < PitchQuiz::kMaxAttempts; ++attempt)
+                    {
+                        quiz.Press(quiz.Target() == 48 ? 49 : 48);
+                        if(attempt + 1 < PitchQuiz::kMaxAttempts)
+                            FinishSounds(quiz);
+                    }
+                FinishSounds(quiz);
+            }
+            assert(quiz.GetState() == PitchQuiz::State::LevelComplete);
+            const auto ui = quiz_controls::PackUi(quiz, false);
+            assert(ui & quiz_controls::kResultHoldMask);
+            assert(ui & quiz_controls::kActiveMask);
+            bool rainbow_has_blue = false;
+            for(unsigned led = 0; led < 10; ++led)
+            {
+                const auto color = quiz_display::ResultColor(quiz.Progress(), led, true, 250);
+                if(score == 10)
+                {
+                    assert(color.red || color.green || color.blue);
+                    rainbow_has_blue |= color.blue != 0;
+                }
+                else
+                    assert(color.red == 0 && color.green == 0 && color.blue == 0);
+            }
+            assert(rainbow_has_blue == (score == 10));
+            VerifyLevelCompletion(quiz);
+        }
+}
+
+void CheckReplayAndExit()
+{
+    PitchQuiz quiz;
+    assert(!quiz.ReplayTarget());
+    assert(quiz.StartLevel(2, 123));
+    assert(!quiz.ReplayTarget());
+    FinishSounds(quiz);
+    const unsigned target = quiz.Target();
+    assert(quiz.ReplayTarget());
+    assert(quiz.GetState() == PitchQuiz::State::Prompt);
+    assert(quiz.Target() == target && quiz.Attempts() == 0 && quiz.Completed() == 0);
+    assert(!quiz.ReplayTarget());
+    FinishSounds(quiz);
+    quiz.Press(target == 48 ? 49 : 48);
+    assert(quiz.Attempts() == 1);
+    assert(!quiz.ReplayTarget());
+    ReachState(quiz, PitchQuiz::State::Feedback);
+    assert(!quiz.ReplayTarget());
+    ReachState(quiz, PitchQuiz::State::Pause);
+    assert(!quiz.ReplayTarget());
+    FinishSounds(quiz);
+    assert(quiz.ReplayTarget());
+    assert(quiz.Attempts() == 1 && quiz.Target() == target);
+    quiz.SetVolume(0.4f);
+    quiz.SetRange(8);
+    quiz.SetWaveform(quiz_synth::Waveform::Saw);
+    quiz.ExitToIdle();
+    assert(quiz.GetState() == PitchQuiz::State::Idle);
+    assert(quiz.CurrentLevel() == 2 && quiz.Attempts() == 1);
+    assert(quiz.Volume() == 0.4f && quiz.Range() == 8);
+    assert(quiz.Waveform() == quiz_synth::Waveform::Saw);
+    assert(quiz.Process() == 0.0f);
+    assert(!quiz.ReplayTarget());
+    quiz.NoteOn(60);
+    float energy = 0.0f;
+    for(unsigned sample = 0; sample < 4800; ++sample)
+        energy += std::fabs(quiz.Process());
+    assert(energy > 1.0f);
+}
+
+void CheckTransportGestures()
+{
+    for(unsigned filled = 0; filled <= 15; ++filled)
+        for(unsigned white = 0; white < 15; ++white)
+        {
+            const auto color = quiz_display::ExitHoldColor(white, filled);
+            assert(color.red == 0 && color.green == 0);
+            assert(color.blue == (white < filled ? 48 : 0));
+        }
+    quiz_display::TransportView view;
+    view.shutdown = quiz_display::Shutdown::Fade;
+    view.fade = 24;
+    auto color = quiz_display::ShutdownColor(view);
+    assert(color.red == 24 && color.green == 48 && color.blue == 24);
+    color = quiz_display::ShutdownColor(view, true);
+    assert(color.red == 0 && color.green == 0 && color.blue == 0);
+    view.shutdown = quiz_display::Shutdown::White;
+    color = quiz_display::ShutdownColor(view);
+    assert(color.red == 48 && color.green == 48 && color.blue == 48);
+    view.shutdown = quiz_display::Shutdown::Dark;
+    color = quiz_display::ShutdownColor(view);
+    assert(color.red == 0 && color.green == 0 && color.blue == 0);
+
+    PitchQuiz quiz;
+    quiz_controls::Transport transport;
+    bool rising[40] = {};
+    bool held[40] = {};
+    const unsigned play = quiz_controls::kPlaySwitch;
+    const unsigned loop = quiz_controls::kLoopSwitch;
+    const unsigned shift = quiz_controls::kShiftSwitch;
+    rising[loop] = true;
+    quiz_controls::Process(quiz, rising, false, 1);
+    assert(quiz.GetState() == PitchQuiz::State::Idle);
+    rising[loop] = false;
+
+    rising[play] = held[play] = true;
+    assert(!transport.Update(quiz, rising, held, 100));
+    quiz_controls::Process(quiz, rising, false, 100);
+    rising[play] = false;
+    assert(!transport.Update(quiz, rising, held, 2500));
+    assert(!transport.ExitHolding());
+    assert(quiz.GetState() == PitchQuiz::State::Prompt);
+    held[play] = false;
+    transport.Update(quiz, rising, held, 2501);
+    rising[play] = held[play] = true;
+    transport.Update(quiz, rising, held, 3000);
+    rising[play] = false;
+    assert(transport.ExitHolding());
+    assert(transport.ExitKeys(4000) == 7);
+    assert((transport.PackUi(4000) & 15) == 7);
+    assert(transport.PackUi(4000) & (1u << 4));
+    transport.Update(quiz, rising, held, 4999);
+    assert(quiz.GetState() != PitchQuiz::State::Idle);
+    assert(transport.Update(quiz, rising, held, 5000));
+    assert(quiz.GetState() == PitchQuiz::State::Idle);
+    assert(!transport.ExitHolding());
+
+    held[play] = false;
+    transport.Update(quiz, rising, held, 5001);
+    quiz.Start(1);
+    rising[play] = held[play] = true;
+    transport.Update(quiz, rising, held, 6000);
+    rising[play] = false;
+    held[play] = false;
+    transport.Update(quiz, rising, held, 6500);
+    transport.Update(quiz, rising, held, 9000);
+    assert(!transport.ExitHolding());
+    assert(quiz.GetState() != PitchQuiz::State::Idle);
+
+    held[shift] = rising[shift] = true;
+    held[loop] = rising[loop] = true;
+    assert(transport.Update(quiz, rising, held, 10000));
+    assert(transport.RebootState() == quiz_controls::Transport::Reboot::Confirming);
+    assert(transport.PackUi(10000) & (1u << 5));
+    rising[shift] = rising[loop] = false;
+    transport.Update(quiz, rising, held, 11000);
+    assert(transport.RebootState() == quiz_controls::Transport::Reboot::Confirming);
+    held[loop] = false;
+    transport.Update(quiz, rising, held, 11001);
+    rising[loop] = held[loop] = true;
+    transport.Update(quiz, rising, held, 11002);
+    assert(transport.RebootState() == quiz_controls::Transport::Reboot::None);
+
+    rising[loop] = false;
+    held[loop] = false;
+    transport.Update(quiz, rising, held, 11003);
+    rising[loop] = held[loop] = true;
+    transport.Update(quiz, rising, held, 12000);
+    rising[loop] = false;
+    held[shift] = false;
+    transport.Update(quiz, rising, held, 12001);
+    rising[shift] = held[shift] = true;
+    assert(transport.Update(quiz, rising, held, 12002));
+    assert(transport.RebootState() == quiz_controls::Transport::Reboot::Requested);
+    assert(transport.PackUi(12002) & (1u << 6));
+    assert(quiz.GetState() == PitchQuiz::State::Idle);
+
+    quiz_controls::Transport wrapped;
+    bool wrap_rising[40] = {};
+    bool wrap_held[40] = {};
+    quiz.Start(123);
+    wrap_rising[play] = wrap_held[play] = true;
+    const uint32_t start = 0xffffff00u;
+    wrapped.Update(quiz, wrap_rising, wrap_held, start);
+    wrap_rising[play] = false;
+    assert(!wrapped.Update(quiz, wrap_rising, wrap_held, start + 1999u));
+    assert(wrapped.Update(quiz, wrap_rising, wrap_held, start + 2000u));
+    assert(quiz.GetState() == PitchQuiz::State::Idle);
 }
 
 int main()
 {
+    CheckTransportGestures();
+    CheckReplayAndExit();
+    CheckEveryLevelCompletion();
     CheckWaveformLowPass();
     CheckTargetRange();
     CheckKeyboardAndWaveformControls();
@@ -642,8 +879,9 @@ int main()
     quiz.Press(quiz.Target());
     assert(quiz.Progress() == results);
     assert(quiz.GetResult(10) == PitchQuiz::Result::Pending);
-    VerifyLevelTransition(quiz);
+    VerifyLevelCompletion(quiz);
 
+    assert(quiz.StartLevel(2, 123));
     FinishSounds(quiz);
     for(unsigned question = 0; question < PitchQuiz::kRoundLength; ++question)
     {
@@ -651,6 +889,7 @@ int main()
         FinishSounds(quiz);
         assert(quiz.GetResult(question) == PitchQuiz::Result::Correct);
     }
+    VerifyLevelCompletion(quiz);
     assert(quiz.GetState() == PitchQuiz::State::Idle);
     assert(quiz.CurrentLevel() == 2);
     assert(quiz.Completed() == PitchQuiz::kRoundLength);
@@ -672,7 +911,7 @@ int main()
         FinishSounds(quiz);
         assert(quiz.GetResult(round) == PitchQuiz::Result::Correct);
     }
-    VerifyLevelTransition(quiz);
+    VerifyLevelCompletion(quiz);
     assert(quiz.StartLevel(1, 123));
     FinishSounds(quiz);
     quiz.Press(quiz.Target() + 1);

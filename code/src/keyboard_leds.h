@@ -132,7 +132,8 @@ inline bool Show(uint32_t progress,
                  bool show_waveform = false,
                  unsigned waveform = 0,
                  bool show_range = false,
-                 unsigned range = 5)
+                 unsigned range = 5,
+                 const quiz_display::TransportView& transport = {})
 {
     for(unsigned led = 0; led < 25; ++led)
     {
@@ -192,6 +193,20 @@ inline bool Show(uint32_t progress,
             EncodeLed(&symbols[kPadding + led * 24], 0, 0, blue);
         }
 
+    if(transport.exit_holding)
+        for(unsigned white = 0; white < 15; ++white)
+        {
+            const auto color = quiz_display::ExitHoldColor(white, transport.exit_keys);
+            EncodeLed(&symbols[kPadding + kWhiteKeyLeds[white] * 24],
+                      color.red, color.green, color.blue);
+        }
+    if(transport.shutdown != quiz_display::Shutdown::None)
+        for(unsigned led = 0; led < 25; ++led)
+        {
+            const auto color = quiz_display::ShutdownColor(transport);
+            EncodeLed(&symbols[kPadding + led * 24], color.red, color.green, color.blue);
+        }
+
     if(HAL_DMA_Start(&dma,
                      reinterpret_cast<uint32_t>(symbols),
                      reinterpret_cast<uint32_t>(&TIM3->CCR2),
@@ -224,6 +239,17 @@ inline bool Show(uint32_t progress,
     EncodePanelLed(panel_symbols, 1, 32, 32, 32);
     EncodePanelLed(panel_symbols, 2, 32, 0, 0);
     EncodePanelLed(panel_symbols, 9, red, green, 0);
+    if(transport.reboot_confirming)
+    {
+        EncodePanelLed(panel_symbols, 0, 48, 0, 0);
+        EncodePanelLed(panel_symbols, 8, transport.blink_on ? 48 : 0, 0, 0);
+    }
+    if(transport.shutdown != quiz_display::Shutdown::None)
+        for(unsigned led = 0; led < kPanelLedCount; ++led)
+        {
+            const auto color = quiz_display::ShutdownColor(transport, led == 0 || led == 8);
+            EncodePanelLed(panel_symbols, led, color.red, color.green, color.blue);
+        }
     if(HAL_DMA_Start(&panel_dma,
                      reinterpret_cast<uint32_t>(panel_symbols),
                      reinterpret_cast<uint32_t>(&TIM5->CCR4),

@@ -42,6 +42,20 @@ class PitchQuiz
         Begin(State::Answer, 0.25f, Frequency(note), kReleaseSeconds);
     }
 
+    bool ReplayTarget()
+    {
+        if(state_ != State::Listening)
+            return false;
+        Begin(State::Prompt, 0.7f, Frequency(target_), kReleaseSeconds);
+        return true;
+    }
+
+    void ExitToIdle()
+    {
+        free_play_.Clear();
+        state_ = State::Idle;
+    }
+
     void SetVolume(float volume)
     {
         volume_ = volume < 0.0f ? 0.0f : (volume > 1.0f ? 1.0f : volume);
@@ -189,7 +203,7 @@ class PitchQuiz
                 Begin(State::Feedback, 0.23f, correct_ ? 660.0f : 220.0f, 0.12f);
                 break;
             case State::Feedback:
-                if(completed_ == kRoundLength && CurrentLevel() < kLevelCount)
+                if(completed_ == kRoundLength)
                     Begin(State::LevelComplete, 2.0f, 0.0f, 0.0f);
                 else
                     Begin(State::Pause, 0.3f, 0.0f, 0.0f);
@@ -203,8 +217,7 @@ class PitchQuiz
                     Begin(State::Prompt, 0.7f, Frequency(target_));
                 break;
             case State::LevelComplete:
-                level_ = static_cast<Level>(CurrentLevel() + 1);
-                ResetLevel();
+                state_ = State::Idle;
                 break;
             default:
                 break;

@@ -11,6 +11,32 @@ struct Color
     uint8_t blue;
 };
 
+enum class Shutdown { None, Fade, White, Dark };
+
+struct TransportView
+{
+    bool exit_holding = false;
+    unsigned exit_keys = 0;
+    bool reboot_confirming = false;
+    bool blink_on = false;
+    Shutdown shutdown = Shutdown::None;
+    uint8_t fade = 0;
+};
+
+inline Color ExitHoldColor(unsigned white_key, unsigned filled)
+{
+    return white_key < 15 && white_key < filled ? Color{0, 0, 48} : Color{0, 0, 0};
+}
+
+inline Color ShutdownColor(const TransportView& transport, bool confirmation_key = false)
+{
+    if(transport.shutdown == Shutdown::White)
+        return {48, 48, 48};
+    if(transport.shutdown == Shutdown::Fade && !confirmation_key)
+        return {transport.fade, 48, transport.fade};
+    return {0, 0, 0};
+}
+
 inline Color WaveformColor(unsigned white_key, unsigned waveform)
 {
     if(white_key < 15 && waveform < quiz_synth::kWaveformCount

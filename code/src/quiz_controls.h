@@ -47,6 +47,8 @@ inline void Process(PitchQuiz& quiz,
                 quiz.NoteOff(key + 48);
     if(shift_held)
         quiz.StopFreePlay();
+    if(shift_held && rising[kLoopSwitch])
+        return;
     if(shift_held)
         for(unsigned level = 0; level < PitchQuiz::kLevelCount; ++level)
             if(rising[kBlackKeySwitches[level]])
@@ -55,8 +57,16 @@ inline void Process(PitchQuiz& quiz,
                 return;
             }
 
-    if(rising[kPlaySwitch] || rising[kLoopSwitch])
-        quiz.Start(seed);
+    if(rising[kPlaySwitch])
+    {
+        if(!shift_held && quiz.GetState() == PitchQuiz::State::Idle)
+            quiz.Start(seed);
+    }
+    else if(rising[kLoopSwitch])
+    {
+        if(!shift_held)
+            quiz.ReplayTarget();
+    }
     else if(!shift_held)
         for(unsigned key = 0; key < 25; ++key)
             if(rising[kKeySwitches[key]])
@@ -67,6 +77,88 @@ inline void Process(PitchQuiz& quiz,
                     quiz.Press(key + 48);
             }
 }
+
+class Transport
+{
+  public:
+    enum class Reboot { None, Confirming, Requested };
+    static constexpr uint32_t kExitHoldMs = 2000;
+
+    bool Update(PitchQuiz& quiz,
+                const bool (&rising)[40],
+                const bool (&held)[40],
+                uint32_t now)
+    {
+        if(reboot_ == Reboot::Requested)
+            return true;
+        if(reboot_ == Reboot::Confirming)
+        {
+            exit_holding_ = false;
+            quiz.StopFreePlay();
+            if(rising[kLoopSwitch])
+                reboot_ = Reboot::None;
+            else if(rising[kShiftSwitch])
+            {
+                reboot_ = Reboot::Requested;
+                quiz.ExitToIdle();
+            }
+            return true;
+        }
+        if(held[kShiftSwitch] && rising[kLoopSwitch])
+        {
+            reboot_ = Reboot::Confirming;
+            exit_holding_ = false;
+            quiz.StopFreePlay();
+            return true;
+        }
+
+        if(!held[kPlaySwitch])
+        {
+            exit_holding_ = false;
+            play_from_idle_ = false;
+        }
+        if(rising[kPlaySwitch])
+        {
+            play_from_idle_ = quiz.GetState() == PitchQuiz::State::Idle;
+            exit_holding_ = !play_from_idle_ && !held[kShiftSwitch];
+            exit_started_ = now;
+        }
+        if(held[kShiftSwitch] || quiz.GetState() == PitchQuiz::State::Idle)
+            exit_holding_ = false;
+        if(exit_holding_ && !play_from_idle_ && now - exit_started_ >= kExitHoldMs)
+        {
+            quiz.ExitToIdle();
+            exit_holding_ = false;
+            return true;
+        }
+        return false;
+    }
+
+    bool ExitHolding() const { return exit_holding_; }
+
+    unsigned ExitKeys(uint32_t now) const
+    {
+        if(!exit_holding_)
+            return 0;
+        const uint32_t elapsed = now - exit_started_;
+        return elapsed >= kExitHoldMs ? 15 : elapsed * 15 / kExitHoldMs;
+    }
+
+    Reboot RebootState() const { return reboot_; }
+
+    uint32_t PackUi(uint32_t now) const
+    {
+        return ExitKeys(now) | (exit_holding_ ? 1u << 4 : 0)
+               | (reboot_ == Reboot::Confirming ? 1u << 5 : 0)
+               | (reboot_ == Reboot::Requested ? 1u << 6 : 0);
+    }
+
+  private:
+    Reboot reboot_ = Reboot::None;
+    bool play_from_idle_ = false;
+    bool exit_holding_ = false;
+    uint32_t exit_started_ = 0;
+};
 
 inline void TurnWaveform(PitchQuiz& quiz, int turn)
 {

@@ -17,7 +17,9 @@ ShiftRegister4021<1> encoder_inputs;
 quiz_controls::ShiftEncoder waveform_encoder;
 quiz_controls::ShiftEncoder range_encoder;
 PitchQuiz quiz;
+quiz_controls::Transport transport;
 std::atomic<uint32_t> ui_snapshot{1u << quiz_controls::kLevelShift};
+std::atomic<uint32_t> transport_snapshot{0};
 std::atomic<uint32_t> pressed_keys{0};
 std::atomic<uint32_t> volume_percent{25};
 std::atomic<uint32_t> range_setting{5};
@@ -93,7 +95,9 @@ void ScanControls()
     pressed_keys.store(key_mask, std::memory_order_relaxed);
 
     shift_held = held[quiz_controls::kShiftSwitch];
-    quiz_controls::Process(quiz, rising, shift_held, System::GetNow(), falling);
+    const uint32_t now = System::GetNow();
+    if(!transport.Update(quiz, rising, held, now))
+        quiz_controls::Process(quiz, rising, shift_held, now, falling);
 
     const int turn = volume_encoder.Update();
     if(turn != 0)
@@ -149,6 +153,28 @@ void AudioCallback(AudioHandle::InputBuffer,
             output[channel][frame] = sample;
     }
     ui_snapshot.store(quiz_controls::PackUi(quiz, shift_held), std::memory_order_relaxed);
+    transport_snapshot.store(transport.PackUi(System::GetNow()), std::memory_order_relaxed);
+}
+
+void ShutdownAndReset()
+{
+    board.StopAudio();
+    quiz_display::TransportView view;
+    view.shutdown = quiz_display::Shutdown::Fade;
+    const uint32_t start = System::GetNow();
+    for(uint32_t elapsed = 0; elapsed < 400; elapsed = System::GetNow() - start)
+    {
+        view.fade = static_cast<uint8_t>(elapsed * 48 / 400);
+        keyboard_leds::Show(0, 0, 0, false, 0, 1, false, false, 0, false, 0, false, 5, view);
+        System::Delay(5);
+    }
+    view.shutdown = quiz_display::Shutdown::White;
+    keyboard_leds::Show(0, 0, 0, false, 0, 1, false, false, 0, false, 0, false, 5, view);
+    System::Delay(120);
+    view.shutdown = quiz_display::Shutdown::Dark;
+    keyboard_leds::Show(0, 0, 0, false, 0, 1, false, false, 0, false, 0, false, 5, view);
+    System::Delay(80);
+    NVIC_SystemReset();
 }
 
 void InitExternalAudio()
@@ -209,6 +235,7 @@ int main()
     bool was_result_hold = false;
     uint32_t result_started_at = 0;
     uint32_t displayed_result_frame = 0;
+    uint32_t displayed_transport = 0;
     while(true)
     {
         const uint32_t current = ui_snapshot.load(std::memory_order_relaxed);
@@ -218,6 +245,15 @@ int main()
         const bool result_hold = (current & quiz_controls::kResultHoldMask) != 0;
         const unsigned waveform = (current >> quiz_controls::kWaveformShift) & 3;
         const uint32_t now = System::GetNow();
+        const uint32_t controls = transport_snapshot.load(std::memory_order_relaxed);
+        if(controls & (1u << 6))
+            ShutdownAndReset();
+        quiz_display::TransportView transport_view;
+        transport_view.exit_holding = (controls & (1u << 4)) != 0;
+        transport_view.exit_keys = controls & 15;
+        transport_view.reboot_confirming = (controls & (1u << 5)) != 0;
+        transport_view.blink_on = transport_view.reboot_confirming && (now / 300) % 2 == 0;
+        const uint32_t transport_frame = controls | (transport_view.blink_on ? 1u << 7 : 0);
         if(result_hold && !was_result_hold)
             result_started_at = now;
         was_result_hold = result_hold;
@@ -240,6 +276,7 @@ int main()
             || volume != displayed_volume || show_volume_bar != displayed_volume_bar
             || show_waveform != displayed_waveform
             || show_range != displayed_range_bar || range != displayed_range
+            || transport_frame != displayed_transport
             || play_blue != displayed_play_blue || result_frame != displayed_result_frame)
            && keyboard_leds::Show(progress,
                                   keys,
@@ -253,7 +290,8 @@ int main()
                                   show_waveform,
                                   waveform,
                                   show_range,
-                                  range))
+                                  range,
+                                  transport_view))
         {
             displayed = current;
             displayed_keys = keys;
@@ -264,6 +302,7 @@ int main()
             displayed_range = range;
             displayed_play_blue = play_blue;
             displayed_result_frame = result_frame;
+            displayed_transport = transport_frame;
         }
         System::Delay(1);
     }

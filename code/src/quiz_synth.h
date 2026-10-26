@@ -64,6 +64,8 @@ class FreePlay
   public:
     static constexpr unsigned kVoiceCount = 6;
     static constexpr unsigned kReleaseSamples = 24000;
+    static constexpr unsigned kAttackSamples = 960;
+    static constexpr unsigned kTransitionSamples = 240;
 
     void SetWaveform(Waveform waveform)
     {
@@ -101,6 +103,8 @@ class FreePlay
                    || (voice.releasing == selected->releasing && voice.age < selected->age))
                     selected = &voice;
 
+        selected->transition_level = selected->active ? selected->last_output : 0.0f;
+        selected->transition_remaining = kTransitionSamples;
         selected->note = note;
         selected->frequency = 440.0f * std::pow(2.0f, (static_cast<float>(note) - 69.0f) / 12.0f);
         selected->envelope = 0.0f;
@@ -153,11 +157,18 @@ class FreePlay
             }
             else
             {
-                voice.envelope += 1.0f / 480;
+                voice.envelope += 1.0f / kAttackSamples;
                 if(voice.envelope > 1.0f)
                     voice.envelope = 1.0f;
             }
-            output += voice.envelope * voice.oscillator.Process(voice.frequency);
+            float sample = voice.envelope * voice.oscillator.Process(voice.frequency);
+            if(voice.transition_remaining > 0)
+            {
+                sample += voice.transition_level * voice.transition_remaining / kTransitionSamples;
+                --voice.transition_remaining;
+            }
+            voice.last_output = sample;
+            output += sample;
         }
         return output * (0.22f / kVoiceCount);
     }
@@ -169,8 +180,11 @@ class FreePlay
         float frequency = 0.0f;
         float envelope = 0.0f;
         float release_level = 0.0f;
+        float last_output = 0.0f;
+        float transition_level = 0.0f;
         unsigned note = 0;
         unsigned remaining = 0;
+        unsigned transition_remaining = 0;
         uint32_t age = 0;
         bool active = false;
         bool releasing = false;
