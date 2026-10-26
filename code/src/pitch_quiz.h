@@ -109,7 +109,7 @@ class PitchQuiz
         random_ ^= random_ << 13;
         random_ ^= random_ >> 17;
         random_ ^= random_ << 5;
-        target_ = notes[random_ % 7];
+        target_ = notes[random_ % (sizeof(notes) / sizeof(notes[0]))];
         attempts_ = 0;
         Begin(State::Prompt, 0.7f, Frequency(target_), kReleaseSeconds);
     }

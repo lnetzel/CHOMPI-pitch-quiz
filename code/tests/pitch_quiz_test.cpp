@@ -36,6 +36,19 @@ bool IsNaturalNote(unsigned note)
 
 int main()
 {
+    PitchQuiz selection_quiz;
+    bool selected_notes[25] = {};
+    for(uint32_t seed = 1; seed <= 4096; ++seed)
+    {
+        selection_quiz.Start(seed);
+        const unsigned note = selection_quiz.Target();
+        assert(note >= 48 && note <= 72);
+        assert(IsNaturalNote(note));
+        selected_notes[note - 48] = true;
+    }
+    for(unsigned note = 48; note <= 72; ++note)
+        assert(selected_notes[note - 48] == IsNaturalNote(note));
+
     PitchQuiz quiz;
     assert(quiz.Volume() == 0.25f);
     quiz.SetVolume(1.5f);
