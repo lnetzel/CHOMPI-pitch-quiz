@@ -4,7 +4,9 @@ A beginner ear-training game for CHOMPI, using the Daisy Seed BOOT_SRAM build se
 
 ## Playing
 
-Press **Play** to start (or restart) a ten-note beginner round. Listen to the generated triangle-wave note, then press the matching keyboard key after the reference finishes. Beginner targets are C4 through B4, using only the natural notes of C major.
+Press **Play** to start (or restart) a ten-note beginner round. Listen to the generated triangle-wave note, then press the matching keyboard key after the reference finishes. Beginner targets span C3 through C5, using only the natural notes of C major.
+
+The volume encoder adjusts output level in 5% steps, starting at 25% after boot. Turning it shows a green volume bar across the white-key LEDs for 500 ms; the volume encoder's panel LED is also lit. A pressed key lights its keyboard LED while held. Reference and answer tones have a 500 ms release. The Play LED is green during a round, and Loop restarts the round.
 
 Each accepted key press plays your answer, followed by an ascending success tone or a descending failure tone. You have three attempts per target. After a miss, the target is replayed; after a correct answer or three misses, the game advances automatically.
 
@@ -13,6 +15,7 @@ The ten black-key LEDs show completed questions from left to right: **green** fo
 Generated audio replaces the starter's input pass-through and is sent to all four codec output channels. MIDI, SD-card support, presets, and battery management are not implemented.
 
 Hardware mapping follows the [published CHOMPI TAPE firmware](https://github.com/CHOMPI-Club/CHOMPI/tree/a73d732613da684e4de844619b690776f0f50ccf/firmware/chompi-tape/code/src): the five active-low CD4021 registers use D7/D8/D9 (latch/clock/data), with Play at input 33. The keyboard's 25 GRB LEDs use D18/TIM3_CH2; black keys are LED indices 0–9. This project uses upstream libDaisy's raw shift-register states with local debouncing, not CHOMPI's modified libDaisy driver.
+The volume encoder uses D15/D17, and its panel indicator is LED 9. This project uses upstream libDaisy's raw shift-register states with local debouncing, not CHOMPI's modified libDaisy driver.
 
 ## Toolchain
 
@@ -40,7 +43,7 @@ make -C code/libs/DaisySP
 make -C code/src -j4
 ```
 
-The BOOT_SRAM binary is written to `code/src/build/CHOMPI_STARTER.bin`. For a new project, change `TARGET` in the Makefile and replace or extend `chompi_main.cpp`.
+The BOOT_SRAM binary is written to `code/src/build/CHOMPI_Pitch_Quiz_V1.0.bin`. For a new project, change `TARGET` in the Makefile and replace or extend `chompi_main.cpp`.
 
 ## Native gameplay tests
 

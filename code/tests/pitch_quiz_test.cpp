@@ -5,7 +5,7 @@
 
 void FinishSounds(PitchQuiz& quiz)
 {
-    for(unsigned i = 0; i < 2 * PitchQuiz::kSampleRate; ++i)
+    for(unsigned i = 0; i < 5 * PitchQuiz::kSampleRate; ++i)
     {
         const float sample = quiz.Process();
         assert(std::isfinite(sample));
@@ -17,13 +17,57 @@ void FinishSounds(PitchQuiz& quiz)
     assert(false);
 }
 
+bool IsNaturalNote(unsigned note)
+{
+    switch(note % 12)
+    {
+        case 0:
+        case 2:
+        case 4:
+        case 5:
+        case 7:
+        case 9:
+        case 11:
+            return true;
+        default:
+            return false;
+    }
+}
+
 int main()
 {
     PitchQuiz quiz;
+    assert(quiz.Volume() == 0.25f);
+    quiz.SetVolume(1.5f);
+    assert(quiz.Volume() == 1.0f);
+    quiz.SetVolume(-1.0f);
+    assert(quiz.Volume() == 0.0f);
+    quiz.SetVolume(0.25f);
     quiz.Press(60);
     assert(quiz.GetState() == PitchQuiz::State::Idle);
     assert(quiz.Process() == 0.0f);
     quiz.Start(123);
+        PitchQuiz release_quiz;
+        release_quiz.Start(1);
+        const unsigned prompt_samples
+            = static_cast<unsigned>(0.7f * PitchQuiz::kSampleRate)
+              + static_cast<unsigned>(PitchQuiz::kReleaseSeconds * PitchQuiz::kSampleRate);
+        for(unsigned i = 0; i < prompt_samples - 1; ++i)
+            release_quiz.Process();
+        assert(release_quiz.GetState() == PitchQuiz::State::Prompt);
+        release_quiz.Process();
+        assert(release_quiz.GetState() == PitchQuiz::State::Listening);
+        release_quiz.Press(release_quiz.Target());
+        const unsigned answer_samples
+            = static_cast<unsigned>(0.25f * PitchQuiz::kSampleRate)
+              + static_cast<unsigned>(PitchQuiz::kReleaseSeconds * PitchQuiz::kSampleRate);
+        for(unsigned i = 0; i < answer_samples - 1; ++i)
+            release_quiz.Process();
+        assert(release_quiz.GetState() == PitchQuiz::State::Answer);
+        release_quiz.Process();
+        assert(release_quiz.GetState() == PitchQuiz::State::Feedback);
+    assert(quiz.Target() >= 48 && quiz.Target() <= 72);
+    assert(IsNaturalNote(quiz.Target()));
     quiz.Press(quiz.Target());
     assert(quiz.Attempts() == 0);
     float energy = 0.0f;
@@ -64,8 +108,8 @@ int main()
     for(unsigned round = 1; round < PitchQuiz::kRoundLength; ++round)
     {
         const unsigned note = quiz.Target();
-        assert(note >= 60 && note <= 71);
-        assert(note != 61 && note != 63 && note != 66 && note != 68 && note != 70);
+        assert(note >= 48 && note <= 72);
+        assert(IsNaturalNote(note));
         for(unsigned attempt = 0; attempt < PitchQuiz::kMaxAttempts; ++attempt)
         {
             quiz.Press(note + 1);

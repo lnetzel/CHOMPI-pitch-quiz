@@ -9,6 +9,7 @@ class PitchQuiz
     static constexpr unsigned kRoundLength = 10;
     static constexpr unsigned kMaxAttempts = 3;
     static constexpr unsigned kSampleRate = 48000;
+    static constexpr float kReleaseSeconds = 0.5f;
 
     enum class State { Idle, Prompt, Listening, Answer, Feedback, Pause };
     enum class Result { Pending, Correct, Wrong };
@@ -27,8 +28,15 @@ class PitchQuiz
             return;
         correct_ = note == target_;
         ++attempts_;
-        Begin(State::Answer, 0.25f, Frequency(note));
+        Begin(State::Answer, 0.25f, Frequency(note), kReleaseSeconds);
     }
+
+    void SetVolume(float volume)
+    {
+        volume_ = volume < 0.0f ? 0.0f : (volume > 1.0f ? 1.0f : volume);
+    }
+
+    float Volume() const { return volume_; }
 
     float Process()
     {
@@ -39,10 +47,9 @@ class PitchQuiz
         if(state_ != State::Pause)
         {
             const float elapsed = static_cast<float>(position_) / kSampleRate;
-            const float remaining = static_cast<float>(length_ - position_) / kSampleRate;
             float envelope = elapsed < 0.01f ? elapsed / 0.01f : 1.0f;
-            if(remaining < 0.12f)
-                envelope *= remaining / 0.12f;
+            if(release_length_ > 0 && position_ >= sustain_length_)
+                envelope *= static_cast<float>(length_ - position_) / release_length_;
             float frequency = frequency_;
             if(state_ == State::Feedback)
             {
@@ -52,7 +59,8 @@ class PitchQuiz
             phase_ += frequency / kSampleRate;
             if(phase_ >= 1.0f)
                 phase_ -= 1.0f;
-            sample = 0.22f * envelope * (1.0f - 4.0f * std::fabs(phase_ - 0.5f));
+            sample = 0.22f * volume_ * envelope
+                     * (1.0f - 4.0f * std::fabs(phase_ - 0.5f));
         }
 
         if(++position_ >= length_)
@@ -78,25 +86,32 @@ class PitchQuiz
         return 440.0f * std::pow(2.0f, (static_cast<float>(note) - 69.0f) / 12.0f);
     }
 
-    void Begin(State state, float seconds, float frequency = 0.0f)
+    void Begin(State state,
+               float sustain_seconds,
+               float frequency = 0.0f,
+               float release_seconds = 0.12f)
     {
         state_ = state;
         position_ = 0;
-        length_ = static_cast<unsigned>(seconds * kSampleRate);
+        sustain_length_ = static_cast<unsigned>(sustain_seconds * kSampleRate);
+        release_length_ = static_cast<unsigned>(release_seconds * kSampleRate);
+        length_ = sustain_length_ + release_length_;
         frequency_ = frequency;
         phase_ = 0.0f;
     }
 
     void NextNote()
     {
-        // Beginner targets are the natural notes C4 through B4.
-        static constexpr unsigned notes[] = {60, 62, 64, 65, 67, 69, 71};
+        // Beginner targets are the natural notes C3 through C5.
+        static constexpr unsigned notes[] = {
+            48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72
+        };
         random_ ^= random_ << 13;
         random_ ^= random_ >> 17;
         random_ ^= random_ << 5;
         target_ = notes[random_ % 7];
         attempts_ = 0;
-        Begin(State::Prompt, 0.7f, Frequency(target_));
+        Begin(State::Prompt, 0.7f, Frequency(target_), kReleaseSeconds);
     }
 
     void Advance()
@@ -113,10 +128,10 @@ class PitchQuiz
                     progress_ |= static_cast<uint32_t>(result) << (2 * completed_);
                     ++completed_;
                 }
-                Begin(State::Feedback, 0.35f, correct_ ? 660.0f : 220.0f);
+                Begin(State::Feedback, 0.23f, correct_ ? 660.0f : 220.0f, 0.12f);
                 break;
             case State::Feedback:
-                Begin(State::Pause, 0.3f);
+                    Begin(State::Pause, 0.3f, 0.0f, 0.0f);
                 break;
             case State::Pause:
                 if(completed_ == kRoundLength)
@@ -139,7 +154,10 @@ class PitchQuiz
     unsigned attempts_ = 0;
     unsigned position_ = 0;
     unsigned length_ = 0;
+    unsigned sustain_length_ = 0;
+    unsigned release_length_ = 0;
     float frequency_ = 0.0f;
     float phase_ = 0.0f;
+    float volume_ = 0.25f;
     bool correct_ = false;
 };
