@@ -79,6 +79,12 @@ inline void TurnWaveform(PitchQuiz& quiz, int turn)
 }
 
 static constexpr uint32_t kProgressMask = (1u << 20) - 1;
+inline void TurnRange(PitchQuiz& quiz, int turn)
+{
+    const int range = static_cast<int>(quiz.Range()) + turn;
+    quiz.SetRange(range < 1 ? 1 : static_cast<unsigned>(range));
+}
+
 static constexpr unsigned kLevelShift = 20;
 static constexpr uint32_t kShiftHeldMask = 1u << 24;
 static constexpr uint32_t kActiveMask = 1u << 25;

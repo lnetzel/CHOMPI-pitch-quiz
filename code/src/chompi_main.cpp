@@ -15,10 +15,12 @@ SaiHandle external_sai_handle;
 ShiftRegister4021<5> buttons;
 ShiftRegister4021<1> encoder_inputs;
 quiz_controls::ShiftEncoder waveform_encoder;
+quiz_controls::ShiftEncoder range_encoder;
 PitchQuiz quiz;
 std::atomic<uint32_t> ui_snapshot{1u << quiz_controls::kLevelShift};
 std::atomic<uint32_t> pressed_keys{0};
 std::atomic<uint32_t> volume_percent{25};
+std::atomic<uint32_t> range_setting{5};
 std::atomic<uint32_t> overlay_until{0};
 std::atomic<uint32_t> overlay_kind{0};
 bool shift_held = false;
@@ -120,6 +122,15 @@ void ScanControls()
         overlay_kind.store(2, std::memory_order_relaxed);
         overlay_until.store(System::GetNow() + 500, std::memory_order_relaxed);
     }
+    const int range_turn = range_encoder.Update(encoder_inputs.RawState(0),
+                                                encoder_inputs.RawState(1));
+    if(range_turn != 0)
+    {
+        quiz_controls::TurnRange(quiz, range_turn);
+        range_setting.store(quiz.Range(), std::memory_order_relaxed);
+        overlay_kind.store(3, std::memory_order_relaxed);
+        overlay_until.store(System::GetNow() + 500, std::memory_order_relaxed);
+    }
 }
 
 void AudioCallback(AudioHandle::InputBuffer,
@@ -192,6 +203,8 @@ int main()
     uint32_t displayed_volume = 25;
     bool displayed_volume_bar = false;
     bool displayed_waveform = false;
+    bool displayed_range_bar = false;
+    uint32_t displayed_range = 5;
     uint8_t displayed_play_blue = 6;
     bool was_result_hold = false;
     uint32_t result_started_at = 0;
@@ -217,6 +230,8 @@ int main()
         const bool overlay_active = static_cast<int32_t>(until - now) > 0;
         const bool show_volume_bar = overlay_active && overlay == 1;
         const bool show_waveform = overlay_active && overlay == 2;
+        const bool show_range = overlay_active && overlay == 3;
+        const uint32_t range = range_setting.load(std::memory_order_relaxed);
         const bool active = (current & quiz_controls::kActiveMask) != 0;
         const uint32_t pulse_phase = System::GetNow() % 2000;
         const uint32_t pulse = pulse_phase < 1000 ? pulse_phase : 2000 - pulse_phase;
@@ -224,6 +239,7 @@ int main()
         if((current != displayed || keys != displayed_keys
             || volume != displayed_volume || show_volume_bar != displayed_volume_bar
             || show_waveform != displayed_waveform
+            || show_range != displayed_range_bar || range != displayed_range
             || play_blue != displayed_play_blue || result_frame != displayed_result_frame)
            && keyboard_leds::Show(progress,
                                   keys,
@@ -235,13 +251,17 @@ int main()
                                   result_hold,
                                   result_elapsed_ms,
                                   show_waveform,
-                                  waveform))
+                                  waveform,
+                                  show_range,
+                                  range))
         {
             displayed = current;
             displayed_keys = keys;
             displayed_volume = volume;
             displayed_volume_bar = show_volume_bar;
             displayed_waveform = show_waveform;
+            displayed_range_bar = show_range;
+            displayed_range = range;
             displayed_play_blue = play_blue;
             displayed_result_frame = result_frame;
         }

@@ -19,6 +19,16 @@ inline Color WaveformColor(unsigned white_key, unsigned waveform)
     return {0, 0, 0};
 }
 
+inline Color RangeColor(unsigned white_key, unsigned range)
+{
+    if(white_key >= 15 || white_key >= range)
+        return {0, 0, 0};
+    if(white_key <= 7)
+        return {static_cast<uint8_t>(48 * white_key / 7),
+                static_cast<uint8_t>(48 - 24 * white_key / 7), 0};
+    return {48, static_cast<uint8_t>(24 * (14 - white_key) / 7), 0};
+}
+
 inline Color ResultColor(uint32_t progress,
                          unsigned led,
                          bool result_hold,

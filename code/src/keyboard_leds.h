@@ -130,7 +130,9 @@ inline bool Show(uint32_t progress,
                  bool result_hold = false,
                  uint32_t result_elapsed_ms = 0,
                  bool show_waveform = false,
-                 unsigned waveform = 0)
+                 unsigned waveform = 0,
+                 bool show_range = false,
+                 unsigned range = 5)
 {
     for(unsigned led = 0; led < 25; ++led)
     {
@@ -162,6 +164,14 @@ inline bool Show(uint32_t progress,
         for(unsigned white = 0; white < 15; ++white)
         {
             const auto color = quiz_display::WaveformColor(white, waveform);
+            EncodeLed(&symbols[kPadding + kWhiteKeyLeds[white] * 24],
+                      color.red, color.green, color.blue);
+        }
+
+    if(show_range)
+        for(unsigned white = 0; white < 15; ++white)
+        {
+            const auto color = quiz_display::RangeColor(white, range);
             EncodeLed(&symbols[kPadding + kWhiteKeyLeds[white] * 24],
                       color.red, color.green, color.blue);
         }
@@ -211,6 +221,8 @@ inline bool Show(uint32_t progress,
     else if(volume > 0.5f)
         red = level;
     EncodePanelLed(panel_symbols, 7, 0, 0, play_blue);
+    EncodePanelLed(panel_symbols, 1, 32, 32, 32);
+    EncodePanelLed(panel_symbols, 2, 32, 0, 0);
     EncodePanelLed(panel_symbols, 9, red, green, 0);
     if(HAL_DMA_Start(&panel_dma,
                      reinterpret_cast<uint32_t>(panel_symbols),

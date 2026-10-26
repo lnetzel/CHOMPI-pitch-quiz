@@ -42,6 +42,7 @@ void VerifyLevelTransition(PitchQuiz& quiz)
     assert(quiz.CurrentLevel() == 1);
     assert(quiz.GetState() == PitchQuiz::State::LevelComplete);
     const uint32_t results = quiz.Progress();
+    const unsigned selected_range = quiz.Range();
     assert(quiz_controls::PackUi(quiz, false) & quiz_controls::kResultHoldMask);
     for(unsigned sample = 0; sample < 2 * PitchQuiz::kSampleRate - 1; ++sample)
         assert(quiz.Process() == 0.0f);
@@ -51,6 +52,7 @@ void VerifyLevelTransition(PitchQuiz& quiz)
     assert(quiz.Progress() == results);
     assert(quiz.Process() == 0.0f);
     assert(quiz.CurrentLevel() == 2);
+    assert(quiz.Range() == selected_range);
     assert(quiz.GetState() == PitchQuiz::State::Prompt);
     assert(quiz.Completed() == 0 && quiz.Attempts() == 0);
     assert((quiz_controls::PackUi(quiz, false) & quiz_controls::kResultHoldMask) == 0);
@@ -371,8 +373,95 @@ void CheckKeyboardAndWaveformControls()
     assert(quiz.GetState() == PitchQuiz::State::Prompt);
 }
 
+unsigned TargetIndex(unsigned note, unsigned level)
+{
+    if(level == 2)
+        return note - 48;
+    unsigned index = 0;
+    for(unsigned candidate = 48; candidate < note; ++candidate)
+        if(IsNaturalNote(candidate))
+            ++index;
+    return index;
+}
+
+void CheckTargetRange()
+{
+    for(unsigned range = 1; range <= 15; ++range)
+        for(unsigned white = 0; white < 15; ++white)
+        {
+            const auto color = quiz_display::RangeColor(white, range);
+            assert(color.blue == 0);
+            assert(color.red <= 48 && color.green <= 48);
+            assert((color.red != 0 || color.green != 0) == (white < range));
+        }
+    const auto easy = quiz_display::RangeColor(0, 15);
+    const auto middle = quiz_display::RangeColor(7, 15);
+    const auto hard = quiz_display::RangeColor(14, 15);
+    assert(easy.red == 0 && easy.green == 48);
+    assert(middle.red == 48 && middle.green == 24);
+    assert(hard.red == 48 && hard.green == 0);
+
+    PitchQuiz bounds;
+    assert(bounds.Range() == 5);
+    quiz_controls::TurnRange(bounds, 1);
+    assert(bounds.Range() == 6);
+    quiz_controls::TurnRange(bounds, -1);
+    assert(bounds.Range() == 5);
+    bounds.SetRange(0);
+    assert(bounds.Range() == 1);
+    quiz_controls::TurnRange(bounds, -1);
+    assert(bounds.Range() == 1);
+    bounds.SetRange(99);
+    assert(bounds.Range() == 15);
+    quiz_controls::TurnRange(bounds, 1);
+    assert(bounds.Range() == 15);
+
+    for(unsigned level : {1u, 2u})
+        for(unsigned range : {1u, 5u, 8u, 15u})
+            for(uint32_t seed = 1; seed <= 8; ++seed)
+            {
+                PitchQuiz quiz;
+                quiz.SetRange(range);
+                assert(quiz.StartLevel(level, seed));
+                FinishSounds(quiz);
+                for(unsigned question = 0; question < PitchQuiz::kRoundLength - 1; ++question)
+                {
+                    const unsigned previous = TargetIndex(quiz.Target(), level);
+                    quiz.Press(quiz.Target());
+                    FinishSounds(quiz);
+                    assert(quiz.Target() >= 48 && quiz.Target() <= 72);
+                    if(level == 1)
+                        assert(IsNaturalNote(quiz.Target()));
+                    const unsigned next = TargetIndex(quiz.Target(), level);
+                    assert((next > previous ? next - previous : previous - next) <= range);
+                }
+                assert(quiz.Range() == range);
+                quiz.Start(123);
+                assert(quiz.Range() == range);
+            }
+
+    bounds.SetRange(1);
+    bounds.Start(123);
+    FinishSounds(bounds);
+    const unsigned current = bounds.Target();
+    bounds.SetRange(8);
+    assert(bounds.Target() == current);
+    assert(bounds.StartLevel(2, 123));
+    assert(bounds.Range() == 8);
+    assert(bounds.StartLevel(1, 123));
+    FinishSounds(bounds);
+    for(unsigned question = 0; question < PitchQuiz::kRoundLength; ++question)
+    {
+        bounds.Press(bounds.Target());
+        FinishSounds(bounds);
+    }
+    VerifyLevelTransition(bounds);
+    assert(bounds.Range() == 8);
+}
+
 int main()
 {
+    CheckTargetRange();
     CheckKeyboardAndWaveformControls();
     CheckFreePlay();
     CheckWaveforms();

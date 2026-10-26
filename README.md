@@ -14,7 +14,11 @@ Turn **physical encoder 1** (the leftmost upper knob, SW4 / ENC_4) to select **T
 - White keys **6-10**: Saw.
 - White keys **11-15**: Square.
 
-The most recently turned knob selects whether the white keys temporarily show waveform or volume. Normal held-key lighting returns when that display expires. Saw and square use DaisySP's band-limited oscillators.
+Encoder 1's panel LED (LED2 / PTH 1) stays white. Saw and square use DaisySP's band-limited oscillators.
+
+Turn **physical encoder 2** (the second upper knob, SW1 / ENC_1) to set the next-target **range**, from **1 to 15**, starting at **5** after boot. Its panel LED (LED3 / PTH 2) stays red. Range counts white-key steps in Level 1 (including adjacent E-F and B-C) and semitones in Level 2. Each new target is chosen within that many steps above or below the previous target, clipped to C3-C5 without wrapping. Repeating the previous target is allowed. The first target of each level is unrestricted. Changing range affects the next new target, not the current prompt or its retries; range survives level changes and restarts and does not restrict free play.
+
+Turning encoder 2 displays range for 500 ms: white keys 1 through the selected number light up, and the rest stay dark. The bar runs from green at key 1 through orange at key 8 to red at key 15. The most recently turned knob selects whether the white keys temporarily show waveform, range, or volume. Range and waveform displays override held-key lighting on white keys; normal lighting returns when the display expires.
 
 After Level 1's final feedback, a two-second result animation plays, then Level 2 starts automatically regardless of score. During every inter-level hold, scores of 9/10 or less blink the green/red results together; a perfect 10/10 instead shows an animated rainbow across the ten result LEDs. Held keys do not override this animation, but SHIFT still shows the level selector. Level 2 stops after ten questions and leaves its results visible. Play or Loop restarts the current level from question 1 and clears its results without changing volume.
 

@@ -49,6 +49,13 @@ class PitchQuiz
 
     float Volume() const { return volume_; }
 
+    void SetRange(unsigned range)
+    {
+        range_ = range < 1 ? 1 : (range > 15 ? 15 : range);
+    }
+
+    unsigned Range() const { return range_; }
+
     void NoteOn(unsigned note)
     {
         if(state_ == State::Idle)
@@ -117,6 +124,7 @@ class PitchQuiz
                 progress_ = 0;
                 completed_ = 0;
                 correct_ = false;
+                has_previous_target_ = false;
                 NextNote();
         }
 
@@ -148,9 +156,18 @@ class PitchQuiz
         random_ ^= random_ << 13;
         random_ ^= random_ >> 17;
         random_ ^= random_ << 5;
-        target_ = level_ == Level::Natural
-                  ? notes[random_ % (sizeof(notes) / sizeof(notes[0]))]
-                  : 48 + random_ % 25;
+        const unsigned count = level_ == Level::Natural
+                                   ? sizeof(notes) / sizeof(notes[0]) : 25;
+        unsigned first = 0;
+        unsigned last = count - 1;
+        if(has_previous_target_)
+        {
+            first = target_index_ > range_ ? target_index_ - range_ : 0;
+            last = target_index_ + range_ < count ? target_index_ + range_ : count - 1;
+        }
+        target_index_ = first + random_ % (last - first + 1);
+        target_ = level_ == Level::Natural ? notes[target_index_] : 48 + target_index_;
+        has_previous_target_ = true;
         attempts_ = 0;
         Begin(State::Prompt, 0.7f, Frequency(target_), kReleaseSeconds);
     }
@@ -200,6 +217,9 @@ class PitchQuiz
     uint32_t progress_ = 0;
     unsigned completed_ = 0;
     unsigned target_ = 60;
+    unsigned target_index_ = 0;
+    unsigned range_ = 5;
+    bool has_previous_target_ = false;
     unsigned attempts_ = 0;
     unsigned position_ = 0;
     unsigned length_ = 0;
