@@ -160,16 +160,6 @@ class Transport
     uint32_t exit_started_ = 0;
 };
 
-inline void TurnWaveform(PitchQuiz& quiz, int turn)
-{
-    int waveform = static_cast<int>(quiz.Waveform()) + turn;
-    if(waveform < 0)
-        waveform = 0;
-    if(waveform >= static_cast<int>(quiz_synth::kWaveformCount))
-        waveform = quiz_synth::kWaveformCount - 1;
-    quiz.SetWaveform(static_cast<quiz_synth::Waveform>(waveform));
-}
-
 static constexpr uint32_t kProgressMask = (1u << 20) - 1;
 inline void TurnRange(PitchQuiz& quiz, int turn)
 {
@@ -181,14 +171,12 @@ static constexpr unsigned kLevelShift = 20;
 static constexpr uint32_t kShiftHeldMask = 1u << 24;
 static constexpr uint32_t kActiveMask = 1u << 25;
 static constexpr uint32_t kResultHoldMask = 1u << 26;
-static constexpr unsigned kWaveformShift = 27;
 
 inline uint32_t PackUi(const PitchQuiz& quiz, bool shift_held)
 {
     return quiz.Progress() | (quiz.CurrentLevel() << kLevelShift)
            | (shift_held ? kShiftHeldMask : 0)
            | (quiz.GetState() != PitchQuiz::State::Idle ? kActiveMask : 0)
-           | (quiz.GetState() == PitchQuiz::State::LevelComplete ? kResultHoldMask : 0)
-           | (static_cast<unsigned>(quiz.Waveform()) << kWaveformShift);
+           | (quiz.GetState() == PitchQuiz::State::LevelComplete ? kResultHoldMask : 0);
 }
 }

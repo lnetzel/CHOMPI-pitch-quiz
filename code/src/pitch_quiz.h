@@ -12,6 +12,13 @@ class PitchQuiz
     static constexpr unsigned kSampleRate = 48000;
     static constexpr float kReleaseSeconds = 0.5f;
     static constexpr unsigned kLevelCount = 2;
+    static constexpr unsigned kFeedbackFirstNoteSamples = 150 * kSampleRate / 1000;
+    static constexpr unsigned kFeedbackSustainSamples = 450 * kSampleRate / 1000;
+    static constexpr unsigned kFeedbackReleaseSamples = 100 * kSampleRate / 1000;
+    static constexpr unsigned kSuccessSignalSamples
+        = kFeedbackSustainSamples + kFeedbackReleaseSamples;
+    static constexpr unsigned kPerfectReplayIntervalSamples = kSampleRate;
+    static constexpr uint32_t kPerfectProgress = ((1u << (2 * kRoundLength)) - 1) / 3;
 
     enum class Level : unsigned { Natural = 1, Chromatic = 2 };
     enum class State { Idle, Prompt, Listening, Answer, Feedback, Pause, LevelComplete };
@@ -20,6 +27,7 @@ class PitchQuiz
     void Start(uint32_t seed)
     {
         free_play_.Clear();
+        oscillator_.SetSquare(false);
         random_ = seed ? seed : 1;
         ResetLevel();
     }
@@ -53,6 +61,7 @@ class PitchQuiz
     void ExitToIdle()
     {
         free_play_.Clear();
+        oscillator_.SetSquare(false);
         state_ = State::Idle;
     }
 
@@ -79,17 +88,6 @@ class PitchQuiz
     void NoteOff(unsigned note) { free_play_.NoteOff(note); }
     void StopFreePlay() { free_play_.Clear(); }
 
-    void SetWaveform(quiz_synth::Waveform waveform)
-    {
-        if(static_cast<unsigned>(waveform) >= quiz_synth::kWaveformCount)
-            return;
-        waveform_ = waveform;
-        oscillator_.SetWaveform(waveform);
-        free_play_.SetWaveform(waveform);
-    }
-
-    quiz_synth::Waveform Waveform() const { return waveform_; }
-
     float Process()
     {
         if(state_ == State::Idle)
@@ -98,20 +96,23 @@ class PitchQuiz
             return 0.0f;
 
         float sample = 0.0f;
-        if(state_ != State::Pause && state_ != State::LevelComplete)
+        if(state_ == State::Feedback)
+            sample = FeedbackSample(position_, correct_);
+        else if(state_ == State::LevelComplete && IsPerfectRound())
+        {
+            const unsigned replay_position = position_ % kPerfectReplayIntervalSamples;
+            if(position_ < 2 * kPerfectReplayIntervalSamples
+               && replay_position < kSuccessSignalSamples)
+            {
+                sample = FeedbackSample(replay_position, true);
+            }
+        }
+        else if(state_ != State::Pause && state_ != State::LevelComplete)
         {
             const float elapsed = static_cast<float>(position_) / kSampleRate;
-            float envelope = elapsed < 0.01f ? elapsed / 0.01f : 1.0f;
-            if(release_length_ > 0 && position_ >= sustain_length_)
-                envelope *= static_cast<float>(length_ - position_) / release_length_;
-            float frequency = frequency_;
-            if(state_ == State::Feedback)
-            {
-                const float fraction = static_cast<float>(position_) / length_;
-                frequency *= correct_ ? (1.0f + fraction) : (1.0f - 0.5f * fraction);
-            }
+            const float envelope = elapsed < 0.01f ? elapsed / 0.01f : 1.0f;
             sample = quiz_synth::FreePlay::kOutputGain * volume_ * envelope
-                     * oscillator_.Process(frequency);
+                     * oscillator_.Process(frequency_);
         }
 
         if(++position_ >= length_)
@@ -146,6 +147,22 @@ class PitchQuiz
     {
         return 440.0f * std::pow(2.0f, (static_cast<float>(note) - 69.0f) / 12.0f);
     }
+
+    float FeedbackSample(unsigned position, bool success)
+    {
+        float envelope = position < kSampleRate / 100
+                             ? static_cast<float>(position) / (kSampleRate / 100)
+                             : 1.0f;
+        if(success && position >= kFeedbackSustainSamples)
+            envelope *= static_cast<float>(kSuccessSignalSamples - position)
+                        / kFeedbackReleaseSamples;
+        const unsigned note = position < kFeedbackFirstNoteSamples
+                                  ? (success ? 83 : 88) : (success ? 88 : 83);
+        return quiz_synth::FreePlay::kOutputGain * volume_ * envelope
+               * oscillator_.Process(Frequency(note));
+    }
+
+    bool IsPerfectRound() const { return progress_ == kPerfectProgress; }
 
     void Begin(State state,
                float sustain_seconds,
@@ -200,13 +217,23 @@ class PitchQuiz
                     progress_ |= static_cast<uint32_t>(result) << (2 * completed_);
                     ++completed_;
                 }
-                Begin(State::Feedback, 0.23f, correct_ ? 660.0f : 220.0f, 0.12f);
+                oscillator_.SetSquare(true);
+                Begin(State::Feedback,
+                      0.45f,
+                      0.0f,
+                      correct_ ? 0.1f : 0.0f);
                 break;
             case State::Feedback:
                 if(completed_ == kRoundLength)
+                {
+                    oscillator_.SetSquare(IsPerfectRound());
                     Begin(State::LevelComplete, 2.0f, 0.0f, 0.0f);
+                }
                 else
+                {
+                    oscillator_.SetSquare(false);
                     Begin(State::Pause, 0.3f, 0.0f, 0.0f);
+                }
                 break;
             case State::Pause:
                 if(completed_ == kRoundLength)
@@ -217,6 +244,7 @@ class PitchQuiz
                     Begin(State::Prompt, 0.7f, Frequency(target_));
                 break;
             case State::LevelComplete:
+                oscillator_.SetSquare(false);
                 state_ = State::Idle;
                 break;
             default:
@@ -241,7 +269,6 @@ class PitchQuiz
     float frequency_ = 0.0f;
     quiz_synth::Oscillator oscillator_;
     quiz_synth::FreePlay free_play_;
-    quiz_synth::Waveform waveform_ = quiz_synth::Waveform::Triangle;
     float volume_ = 0.25f;
     bool correct_ = false;
 };

@@ -6,9 +6,6 @@
 
 namespace quiz_synth
 {
-enum class Waveform : unsigned { Triangle, Saw, Square };
-constexpr unsigned kWaveformCount = 3;
-
 class Oscillator
 {
   public:
@@ -16,23 +13,15 @@ class Oscillator
     {
         oscillator_.Init(48000.0f);
         oscillator_.SetAmp(1.0f);
-        SetWaveform(Waveform::Triangle);
+        SetSquare(false);
         Reset();
     }
 
-    void SetWaveform(Waveform waveform)
+    void SetSquare(bool square)
     {
-        static constexpr uint8_t waveforms[] = {
-            daisysp::Oscillator::WAVE_TRI,
-            daisysp::Oscillator::WAVE_POLYBLEP_SAW,
-            daisysp::Oscillator::WAVE_POLYBLEP_SQUARE
-        };
-        const unsigned index = static_cast<unsigned>(waveform);
-        if(index < kWaveformCount)
-        {
-            oscillator_.SetWaveform(waveforms[index]);
-            waveform_ = waveform;
-        }
+        square_ = square;
+        oscillator_.SetWaveform(square ? daisysp::Oscillator::WAVE_POLYBLEP_SQUARE
+                                       : daisysp::Oscillator::WAVE_TRI);
     }
 
     void Reset()
@@ -50,29 +39,23 @@ class Oscillator
         oscillator_.SetFreq(frequency);
         const float sample = oscillator_.Process();
         const float softened = lowpass_[1].Process(lowpass_[0].Process(sample));
-        return waveform_ == Waveform::Triangle ? sample : softened;
+        return square_ ? softened : sample;
     }
 
   private:
     daisysp::Oscillator oscillator_{};
     daisysp::Tone lowpass_[2];
-    Waveform waveform_ = Waveform::Triangle;
+    bool square_ = false;
 };
 
 class FreePlay
 {
   public:
     static constexpr unsigned kVoiceCount = 6;
-        static constexpr float kOutputGain = 0.22f / kVoiceCount;
+    static constexpr float kOutputGain = 0.22f / kVoiceCount;
     static constexpr unsigned kReleaseSamples = 24000;
     static constexpr unsigned kAttackSamples = 960;
     static constexpr unsigned kTransitionSamples = 240;
-
-    void SetWaveform(Waveform waveform)
-    {
-        for(auto& voice : voices_)
-            voice.oscillator.SetWaveform(waveform);
-    }
 
     void Clear()
     {

@@ -129,8 +129,6 @@ inline bool Show(uint32_t progress,
                  bool shift_held,
                  bool result_hold = false,
                  uint32_t result_elapsed_ms = 0,
-                 bool show_waveform = false,
-                 unsigned waveform = 0,
                  bool show_range = false,
                  unsigned range = 5,
                  const quiz_display::TransportView& transport = {})
@@ -160,14 +158,6 @@ inline bool Show(uint32_t progress,
     for(unsigned key = 0; key < 25; ++key)
         if(pressed_keys & (1u << key))
             EncodeLed(&symbols[kPadding + kKeyLeds[key] * 24], 64, 64, 64);
-
-    if(show_waveform)
-        for(unsigned white = 0; white < 15; ++white)
-        {
-            const auto color = quiz_display::WaveformColor(white, waveform);
-            EncodeLed(&symbols[kPadding + kWhiteKeyLeds[white] * 24],
-                      color.red, color.green, color.blue);
-        }
 
     if(show_range)
         for(unsigned white = 0; white < 15; ++white)

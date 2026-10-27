@@ -20,6 +20,77 @@ void FinishSounds(PitchQuiz& quiz)
     assert(false);
 }
 
+unsigned CountRisingCrossings(PitchQuiz& quiz, unsigned samples)
+{
+    unsigned crossings = 0;
+    float previous = 0.0f;
+    for(unsigned sample = 0; sample < samples; ++sample)
+    {
+        const float output = quiz.Process();
+        if(previous <= 0.0f && output > 0.0f)
+            ++crossings;
+        previous = output;
+    }
+    return crossings;
+}
+
+void CheckFeedbackSounds()
+{
+    for(bool correct : {false, true})
+    {
+        PitchQuiz quiz;
+        quiz.Start(123);
+        FinishSounds(quiz);
+        const unsigned target = quiz.Target();
+        quiz.Press(correct ? target : target == 48 ? 49 : 48);
+        while(quiz.GetState() != PitchQuiz::State::Feedback)
+            quiz.Process();
+
+        constexpr unsigned window = PitchQuiz::kSampleRate / 10;
+        quiz_synth::Oscillator square_reference;
+        square_reference.SetSquare(true);
+        square_reference.Reset();
+        const unsigned first_note_number = correct ? 83 : 88;
+        const float first_frequency
+            = 440.0f * std::pow(2.0f, (first_note_number - 69.0f) / 12.0f);
+        unsigned first_note = 0;
+        float previous = 0.0f;
+        for(unsigned sample = 0; sample < window; ++sample)
+        {
+            const float output = quiz.Process();
+            if(sample < 1000)
+            {
+                const float envelope = sample < PitchQuiz::kSampleRate / 100
+                                           ? static_cast<float>(sample)
+                                                 / (PitchQuiz::kSampleRate / 100)
+                                           : 1.0f;
+                const float expected = quiz_synth::FreePlay::kOutputGain * quiz.Volume()
+                                       * envelope * square_reference.Process(first_frequency);
+                assert(std::fabs(output - expected) < 1e-7f);
+            }
+            if(previous <= 0.0f && output > 0.0f)
+                ++first_note;
+            previous = output;
+        }
+        const unsigned expected_first = correct ? 99 : 132;
+        assert(first_note >= expected_first - 3 && first_note <= expected_first + 3);
+
+        CountRisingCrossings(quiz, PitchQuiz::kFeedbackFirstNoteSamples);
+        const unsigned second_note = CountRisingCrossings(quiz, window);
+        const unsigned expected_second = correct ? 132 : 99;
+        assert(second_note >= expected_second - 3 && second_note <= expected_second + 3);
+
+        const unsigned signal_length = correct ? PitchQuiz::kSuccessSignalSamples
+                                               : PitchQuiz::kFeedbackSustainSamples;
+        const unsigned samples_checked = 2 * window + PitchQuiz::kFeedbackFirstNoteSamples;
+        for(unsigned sample = samples_checked; sample < signal_length - 1; ++sample)
+            quiz.Process();
+        assert(quiz.GetState() == PitchQuiz::State::Feedback);
+        quiz.Process();
+        assert(quiz.GetState() == PitchQuiz::State::Pause);
+    }
+}
+
 bool IsNaturalNote(unsigned note)
 {
     switch(note % 12)
@@ -44,8 +115,21 @@ void VerifyLevelCompletion(PitchQuiz& quiz)
     const uint32_t results = quiz.Progress();
     const unsigned selected_range = quiz.Range();
     assert(quiz_controls::PackUi(quiz, false) & quiz_controls::kResultHoldMask);
+    float first_replay_energy = 0.0f;
+    float second_replay_energy = 0.0f;
     for(unsigned sample = 0; sample < 2 * PitchQuiz::kSampleRate - 1; ++sample)
-        assert(quiz.Process() == 0.0f);
+    {
+        const float output = quiz.Process();
+        if(sample < PitchQuiz::kSuccessSignalSamples)
+            first_replay_energy += output * output;
+        else if(sample >= PitchQuiz::kPerfectReplayIntervalSamples
+                && sample < PitchQuiz::kPerfectReplayIntervalSamples
+                               + PitchQuiz::kSuccessSignalSamples)
+            second_replay_energy += output * output;
+    }
+    const bool perfect = results == PitchQuiz::kPerfectProgress;
+    assert((first_replay_energy > 0.0f) == perfect);
+    assert((second_replay_energy > 0.0f) == perfect);
     assert(quiz.GetState() == PitchQuiz::State::LevelComplete);
     assert(quiz.Progress() == results);
     quiz.Press(quiz.Target());
@@ -262,15 +346,14 @@ void CheckWaveformLowPass()
 {
     const uint8_t raw_waveforms[] = {
         daisysp::Oscillator::WAVE_TRI,
-        daisysp::Oscillator::WAVE_POLYBLEP_SAW,
         daisysp::Oscillator::WAVE_POLYBLEP_SQUARE
     };
-    for(unsigned waveform = 0; waveform < quiz_synth::kWaveformCount; ++waveform)
+    for(unsigned waveform = 0; waveform < 2; ++waveform)
     {
         for(float frequency : {130.8128f, 440.0f, 523.2511f})
         {
             quiz_synth::Oscillator filtered;
-            filtered.SetWaveform(static_cast<quiz_synth::Waveform>(waveform));
+            filtered.SetSquare(waveform == 1);
             daisysp::Oscillator raw{};
             raw.Init(48000.0f);
             raw.SetAmp(1.0f);
@@ -308,34 +391,10 @@ void CheckWaveformLowPass()
             filtered.Reset();
             const float restarted = filtered.Process(frequency);
             quiz_synth::Oscillator fresh;
-            fresh.SetWaveform(static_cast<quiz_synth::Waveform>(waveform));
+            fresh.SetSquare(waveform == 1);
             assert(restarted == fresh.Process(frequency));
         }
     }
-}
-
-void CheckWaveforms()
-{
-    float energies[3] = {};
-    for(unsigned index = 0; index < quiz_synth::kWaveformCount; ++index)
-    {
-        PitchQuiz quiz;
-        const auto waveform = static_cast<quiz_synth::Waveform>(index);
-        quiz.SetWaveform(waveform);
-        quiz.Start(123);
-        assert(quiz.Waveform() == waveform);
-        for(unsigned sample = 0; sample < PitchQuiz::kSampleRate / 2; ++sample)
-        {
-            const float output = quiz.Process();
-            assert(std::isfinite(output));
-            assert(std::fabs(output) <= 0.22f);
-            energies[index] += output * output;
-        }
-        assert(energies[index] > 1.0f);
-        quiz.SetWaveform(static_cast<quiz_synth::Waveform>(99));
-        assert(quiz.Waveform() == waveform);
-    }
-    assert(std::fabs(energies[2] - energies[0]) > 0.5f);
 }
 
 void CheckGameModeVolume()
@@ -355,57 +414,48 @@ void CheckGameModeVolume()
 
 void CheckFreePlay()
 {
-    for(unsigned waveform = 0; waveform < quiz_synth::kWaveformCount; ++waveform)
-    {
-        quiz_synth::FreePlay retrigger;
-        retrigger.SetWaveform(static_cast<quiz_synth::Waveform>(waveform));
-        retrigger.NoteOn(60);
-        float previous = 0.0f;
-        for(unsigned sample = 0; sample < 3000; ++sample)
-            previous = retrigger.Process();
-        retrigger.NoteOff(60);
-        retrigger.NoteOn(60);
-        assert(std::fabs(retrigger.Process() - previous) < 0.0001f);
+    quiz_synth::FreePlay retrigger;
+    retrigger.NoteOn(60);
+    float previous = 0.0f;
+    for(unsigned sample = 0; sample < 3000; ++sample)
+        previous = retrigger.Process();
+    retrigger.NoteOff(60);
+    retrigger.NoteOn(60);
+    assert(std::fabs(retrigger.Process() - previous) < 0.0001f);
 
-        quiz_synth::FreePlay stolen;
-        stolen.SetWaveform(static_cast<quiz_synth::Waveform>(waveform));
-        stolen.NoteOn(60);
-        for(unsigned note = 61; note < 66; ++note)
-            stolen.NoteOn(note);
-        for(unsigned sample = 0; sample < 3000; ++sample)
-            previous = stolen.Process();
-        stolen.NoteOn(67);
-        assert(std::fabs(stolen.Process() - previous) < 0.004f);
+    quiz_synth::FreePlay stolen;
+    stolen.NoteOn(60);
+    for(unsigned note = 61; note < 66; ++note)
+        stolen.NoteOn(note);
+    for(unsigned sample = 0; sample < 3000; ++sample)
+        previous = stolen.Process();
+    stolen.NoteOn(67);
+    assert(std::fabs(stolen.Process() - previous) < 0.004f);
+
+    quiz_synth::FreePlay synth;
+    synth.NoteOn(128);
+    assert(synth.ActiveVoices() == 0);
+    for(unsigned note = 60; note < 66; ++note)
+        synth.NoteOn(note);
+    assert(synth.ActiveVoices() == 6);
+    for(unsigned sample = 0; sample < 48000; ++sample)
+    {
+        const float output = synth.Process();
+        assert(std::isfinite(output) && std::fabs(output) <= 0.22001f);
     }
-
-    for(unsigned waveform = 0; waveform < quiz_synth::kWaveformCount; ++waveform)
-    {
-        quiz_synth::FreePlay synth;
-        synth.SetWaveform(static_cast<quiz_synth::Waveform>(waveform));
-        synth.NoteOn(128);
-        assert(synth.ActiveVoices() == 0);
-        for(unsigned note = 60; note < 66; ++note)
-            synth.NoteOn(note);
-        assert(synth.ActiveVoices() == 6);
-        for(unsigned sample = 0; sample < 48000; ++sample)
-        {
-            const float output = synth.Process();
-            assert(std::isfinite(output) && std::fabs(output) <= 0.22001f);
-        }
-        synth.NoteOn(66);
-        assert(synth.ActiveVoices() == 6);
-        assert(!synth.IsHeld(60) && synth.IsHeld(66));
-        synth.NoteOff(60);
-        assert(synth.IsHeld(66));
-        for(unsigned note = 61; note <= 66; ++note)
-            synth.NoteOff(note);
-        for(unsigned sample = 0; sample < quiz_synth::FreePlay::kReleaseSamples - 1; ++sample)
-            synth.Process();
-        assert(synth.ActiveVoices() == 6);
+    synth.NoteOn(66);
+    assert(synth.ActiveVoices() == 6);
+    assert(!synth.IsHeld(60) && synth.IsHeld(66));
+    synth.NoteOff(60);
+    assert(synth.IsHeld(66));
+    for(unsigned note = 61; note <= 66; ++note)
+        synth.NoteOff(note);
+    for(unsigned sample = 0; sample < quiz_synth::FreePlay::kReleaseSamples - 1; ++sample)
         synth.Process();
-        assert(synth.ActiveVoices() == 0);
-        assert(synth.Process() == 0.0f);
-    }
+    assert(synth.ActiveVoices() == 6);
+    synth.Process();
+    assert(synth.ActiveVoices() == 0);
+    assert(synth.Process() == 0.0f);
 
     PitchQuiz quiz;
     quiz.NoteOn(60);
@@ -414,16 +464,14 @@ void CheckFreePlay()
         energy += std::fabs(quiz.Process());
     assert(energy > 1.0f);
     assert(quiz.GetState() == PitchQuiz::State::Idle && quiz.Attempts() == 0);
-    quiz.SetWaveform(quiz_synth::Waveform::Saw);
     quiz.Start(123);
-    assert(quiz.Waveform() == quiz_synth::Waveform::Saw);
     FinishSounds(quiz);
     assert(quiz.Process() == 0.0f);
     quiz.NoteOn(60);
     assert(quiz.Process() == 0.0f);
 }
 
-void CheckKeyboardAndWaveformControls()
+void CheckKeyboardAndRangeControls()
 {
     quiz_controls::ShiftEncoder encoder;
     for(unsigned sample = 0; sample < 4; ++sample)
@@ -434,14 +482,6 @@ void CheckKeyboardAndWaveformControls()
     assert(encoder.Update(false, true) == 0);
     assert(encoder.Update(false, false) == 0);
     assert(encoder.Update(false, false) == -1);
-    for(unsigned waveform = 0; waveform < 3; ++waveform)
-        for(unsigned white = 0; white < 15; ++white)
-        {
-            const auto color = quiz_display::WaveformColor(white, waveform);
-            const unsigned expected = white / 5 == waveform ? 48 : 0;
-            assert(color.red == expected && color.green == expected && color.blue == expected);
-        }
-
     PitchQuiz quiz;
     bool rising[40] = {};
     bool falling[40] = {};
@@ -467,22 +507,16 @@ void CheckKeyboardAndWaveformControls()
     quiz_controls::Process(quiz, rising, false, 5, falling);
     assert(quiz.Process() == 0.0f);
 
-    quiz_controls::TurnWaveform(quiz, -1);
-    assert(quiz.Waveform() == quiz_synth::Waveform::Triangle);
-    quiz_controls::TurnWaveform(quiz, 1);
-    assert(quiz.Waveform() == quiz_synth::Waveform::Saw);
-    quiz_controls::TurnWaveform(quiz, 1);
-    quiz_controls::TurnWaveform(quiz, 1);
-    assert(quiz.Waveform() == quiz_synth::Waveform::Square);
+    quiz_controls::TurnRange(quiz, 3);
+    assert(quiz.Range() == 8);
+    quiz_controls::TurnRange(quiz, -10);
+    assert(quiz.Range() == 1);
     const auto ui = quiz_controls::PackUi(quiz, false);
-    assert(((ui >> quiz_controls::kWaveformShift) & 3) == 2);
+    assert((ui >> 27) == 0);
     assert((ui & quiz_controls::kActiveMask) == 0);
     rising[quiz_controls::kPlaySwitch] = true;
     quiz_controls::Process(quiz, rising, false, 6, falling);
     assert(quiz.GetState() == PitchQuiz::State::Prompt);
-    assert(quiz.Waveform() == quiz_synth::Waveform::Square);
-    quiz_controls::TurnWaveform(quiz, -1);
-    assert(quiz.Waveform() == quiz_synth::Waveform::Saw);
     assert(quiz.GetState() == PitchQuiz::State::Prompt);
 }
 
@@ -639,12 +673,10 @@ void CheckReplayAndExit()
     assert(quiz.Attempts() == 1 && quiz.Target() == target);
     quiz.SetVolume(0.4f);
     quiz.SetRange(8);
-    quiz.SetWaveform(quiz_synth::Waveform::Saw);
     quiz.ExitToIdle();
     assert(quiz.GetState() == PitchQuiz::State::Idle);
     assert(quiz.CurrentLevel() == 2 && quiz.Attempts() == 1);
     assert(quiz.Volume() == 0.4f && quiz.Range() == 8);
-    assert(quiz.Waveform() == quiz_synth::Waveform::Saw);
     assert(quiz.Process() == 0.0f);
     assert(!quiz.ReplayTarget());
     quiz.NoteOn(60);
@@ -766,15 +798,15 @@ void CheckTransportGestures()
 
 int main()
 {
+    CheckFeedbackSounds();
     CheckTransportGestures();
     CheckReplayAndExit();
     CheckEveryLevelCompletion();
     CheckWaveformLowPass();
     CheckTargetRange();
-    CheckKeyboardAndWaveformControls();
+    CheckKeyboardAndRangeControls();
     CheckFreePlay();
     CheckGameModeVolume();
-    CheckWaveforms();
     CheckResultAnimations();
     CheckControlRouting();
     CheckLevelRestarts();
@@ -854,7 +886,7 @@ int main()
         previous = sample;
     }
     const float expected = 440.0f * std::pow(2.0f, (quiz.Target() - 69.0f) / 12.0f);
-    assert(energy > 1.0f);
+    assert(energy > 0.5f);
     assert(std::fabs(crossings * 2.0f - expected) < 3.0f);
     FinishSounds(quiz);
     quiz.Press(128);

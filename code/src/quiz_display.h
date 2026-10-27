@@ -37,14 +37,6 @@ inline Color ShutdownColor(const TransportView& transport, bool confirmation_key
     return {0, 0, 0};
 }
 
-inline Color WaveformColor(unsigned white_key, unsigned waveform)
-{
-    if(white_key < 15 && waveform < quiz_synth::kWaveformCount
-       && white_key / 5 == waveform)
-        return {48, 48, 48};
-    return {0, 0, 0};
-}
-
 inline Color RangeColor(unsigned white_key, unsigned range)
 {
     if(white_key >= 15 || white_key >= range)
