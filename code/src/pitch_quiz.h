@@ -10,6 +10,7 @@ class PitchQuiz
     static constexpr unsigned kRoundLength = 10;
     static constexpr unsigned kMaxAttempts = 3;
     static constexpr unsigned kSampleRate = 48000;
+    static constexpr unsigned kTargetRange = 5;
     static constexpr float kReleaseSeconds = 0.25f;
     static constexpr unsigned kLevelCount = 2;
     static constexpr unsigned kFeedbackFirstNoteSamples = 150 * kSampleRate / 1000;
@@ -71,13 +72,6 @@ class PitchQuiz
 
     float Volume() const { return volume_; }
 
-    void SetRange(unsigned range)
-    {
-        range_ = range < 1 ? 1 : (range > 15 ? 15 : range);
-    }
-
-    unsigned Range() const { return range_; }
-
     void NoteOn(unsigned note)
     {
         if(state_ == State::Idle)
@@ -123,6 +117,10 @@ class PitchQuiz
     unsigned CurrentLevel() const { return static_cast<unsigned>(level_); }
     unsigned Target() const { return target_; }
     unsigned Attempts() const { return attempts_; }
+    unsigned PendingWrongAttempts() const
+    {
+        return !correct_ && attempts_ < kMaxAttempts ? attempts_ : 0;
+    }
     unsigned Completed() const { return completed_; }
     uint32_t Progress() const { return progress_; }
     Result GetResult(unsigned index) const
@@ -189,8 +187,9 @@ class PitchQuiz
         unsigned last = count - 1;
         if(has_previous_target_)
         {
-            first = target_index_ > range_ ? target_index_ - range_ : 0;
-            last = target_index_ + range_ < count ? target_index_ + range_ : count - 1;
+            first = target_index_ > kTargetRange ? target_index_ - kTargetRange : 0;
+            last = target_index_ + kTargetRange < count
+                       ? target_index_ + kTargetRange : count - 1;
         }
         target_index_ = first + random_ % (last - first + 1);
         target_ = level_ == Level::Natural ? notes[target_index_] : 48 + target_index_;
@@ -248,7 +247,6 @@ class PitchQuiz
     unsigned completed_ = 0;
     unsigned target_ = 60;
     unsigned target_index_ = 0;
-    unsigned range_ = 5;
     bool has_previous_target_ = false;
     unsigned attempts_ = 0;
     unsigned position_ = 0;

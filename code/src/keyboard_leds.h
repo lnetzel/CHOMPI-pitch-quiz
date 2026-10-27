@@ -129,17 +129,19 @@ inline bool Show(uint32_t progress,
                  bool shift_held,
                  bool result_hold = false,
                  uint32_t result_elapsed_ms = 0,
-                 bool show_range = false,
-                 unsigned range = 5,
+                 unsigned wrong_attempts = 0,
+                 bool game_active = false,
+                 uint32_t elapsed_ms = 0,
                  const quiz_display::TransportView& transport = {})
 {
     for(unsigned led = 0; led < 25; ++led)
     {
-        const unsigned result = led < 10 ? (progress >> (2 * led)) & 3 : 0;
-        EncodeLed(&symbols[kPadding + led * 24],
-                  result == 2 ? 32 : 0,
-                  result == 1 ? 32 : 0,
-                  0);
+        const auto color = quiz_display::ResultColor(progress,
+                                                     led,
+                                                     false,
+                                                     result_elapsed_ms,
+                                                     wrong_attempts);
+        EncodeLed(&symbols[kPadding + led * 24], color.red, color.green, color.blue);
     }
 
     if(show_volume_bar)
@@ -159,18 +161,14 @@ inline bool Show(uint32_t progress,
         if(pressed_keys & (1u << key))
             EncodeLed(&symbols[kPadding + kKeyLeds[key] * 24], 64, 64, 64);
 
-    if(show_range)
-        for(unsigned white = 0; white < 15; ++white)
-        {
-            const auto color = quiz_display::RangeColor(white, range);
-            EncodeLed(&symbols[kPadding + kWhiteKeyLeds[white] * 24],
-                      color.red, color.green, color.blue);
-        }
-
     if(result_hold)
         for(unsigned led = 0; led < PitchQuiz::kRoundLength; ++led)
         {
-            const auto color = quiz_display::ResultColor(progress, led, true, result_elapsed_ms);
+            const auto color = quiz_display::ResultColor(progress,
+                                                         led,
+                                                         true,
+                                                         result_elapsed_ms,
+                                                         wrong_attempts);
             EncodeLed(&symbols[kPadding + led * 24], color.red, color.green, color.blue);
         }
 
@@ -214,6 +212,8 @@ inline bool Show(uint32_t progress,
         panel_symbols[i] = 0;
     for(unsigned led = 0; led < kPanelLedCount; ++led)
         EncodePanelLed(panel_symbols, led, 0, 0, 0);
+    const auto shift_color = quiz_display::ShiftColor(elapsed_ms);
+    EncodePanelLed(panel_symbols, 0, shift_color.red, shift_color.green, shift_color.blue);
     const float volume = (volume_percent > 100 ? 100 : volume_percent) / 100.0f;
     const uint8_t level = static_cast<uint8_t>(volume * 255.0f);
     uint8_t red = 0;
@@ -226,9 +226,9 @@ inline bool Show(uint32_t progress,
     else if(volume > 0.5f)
         red = level;
     EncodePanelLed(panel_symbols, 7, 0, 0, play_blue);
-    EncodePanelLed(panel_symbols, 1, 32, 32, 32);
-    EncodePanelLed(panel_symbols, 2, 32, 0, 0);
     EncodePanelLed(panel_symbols, 9, red, green, 0);
+    const auto loop_color = quiz_display::LoopColor(game_active, elapsed_ms);
+    EncodePanelLed(panel_symbols, 8, loop_color.red, loop_color.green, loop_color.blue);
     if(transport.reboot_confirming)
     {
         EncodePanelLed(panel_symbols, 0, 48, 0, 0);

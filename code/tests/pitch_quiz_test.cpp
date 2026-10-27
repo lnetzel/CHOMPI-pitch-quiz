@@ -121,7 +121,6 @@ void VerifyLevelCompletion(PitchQuiz& quiz)
     const unsigned selected_level = quiz.CurrentLevel();
     assert(quiz.GetState() == PitchQuiz::State::LevelComplete);
     const uint32_t results = quiz.Progress();
-    const unsigned selected_range = quiz.Range();
     assert(quiz_controls::PackUi(quiz, false) & quiz_controls::kResultHoldMask);
     float first_replay_energy = 0.0f;
     float second_replay_energy = 0.0f;
@@ -146,7 +145,6 @@ void VerifyLevelCompletion(PitchQuiz& quiz)
     assert(quiz.Progress() == results);
     assert(quiz.Process() == 0.0f);
     assert(quiz.CurrentLevel() == selected_level);
-    assert(quiz.Range() == selected_range);
     assert(quiz.GetState() == PitchQuiz::State::Idle);
     assert(quiz.Completed() == PitchQuiz::kRoundLength);
     assert((quiz_controls::PackUi(quiz, false) & quiz_controls::kResultHoldMask) == 0);
@@ -363,6 +361,52 @@ void CheckResultAnimations()
     assert(white_key.red == 0 && white_key.green == 0 && white_key.blue == 0);
 }
 
+void CheckLoopIndicator()
+{
+    const auto idle = quiz_display::LoopColor(false, 1200);
+    assert(idle.red == 0 && idle.green == 0 && idle.blue == 0);
+    const auto dim = quiz_display::LoopColor(true, 0);
+    const auto bright = quiz_display::LoopColor(true, 1200);
+    const auto repeated = quiz_display::LoopColor(true, 2400);
+    assert(dim.red == 4 && dim.green == 4 && dim.blue == 0);
+    assert(bright.red == 48 && bright.green == 48 && bright.blue == 0);
+    assert(repeated.red == dim.red && repeated.green == dim.green);
+    const auto shift_dim = quiz_display::ShiftColor(0);
+    const auto shift_bright = quiz_display::ShiftColor(1200);
+    assert(shift_dim.red == 4 && shift_dim.green == 0 && shift_dim.blue == 0);
+    assert(shift_bright.red == 32 && shift_bright.green == 0 && shift_bright.blue == 0);
+}
+
+void CheckAttemptColors()
+{
+    PitchQuiz quiz;
+    quiz.Start(123);
+    FinishSounds(quiz);
+    const unsigned wrong_note = quiz.Target() == 127 ? quiz.Target() - 1 : quiz.Target() + 1;
+
+    quiz.Press(wrong_note);
+    unsigned wrong_attempts
+        = (quiz_controls::PackUi(quiz, false) >> quiz_controls::kWrongAttemptsShift) & 3;
+    assert(wrong_attempts == 1);
+    auto color = quiz_display::ResultColor(quiz.Progress(), 0, false, 0, wrong_attempts);
+    assert(color.red == 32 && color.green == 32 && color.blue == 0);
+    FinishSounds(quiz);
+
+    quiz.Press(wrong_note);
+    wrong_attempts
+        = (quiz_controls::PackUi(quiz, false) >> quiz_controls::kWrongAttemptsShift) & 3;
+    assert(wrong_attempts == 2);
+    color = quiz_display::ResultColor(quiz.Progress(), 0, false, 0, wrong_attempts);
+    assert(color.red == 48 && color.green == 24 && color.blue == 0);
+    FinishSounds(quiz);
+
+    quiz.Press(wrong_note);
+    ReachState(quiz, PitchQuiz::State::Feedback);
+    assert(quiz.GetResult(0) == PitchQuiz::Result::Wrong);
+    color = quiz_display::ResultColor(quiz.Progress(), 0, false, 0);
+    assert(color.red == 32 && color.green == 0 && color.blue == 0);
+}
+
 void CheckWaveformLowPass()
 {
     const uint8_t raw_waveforms[] = {
@@ -501,17 +545,8 @@ void CheckFreePlay()
     assert(quiz.Process() == 0.0f);
 }
 
-void CheckKeyboardAndRangeControls()
+void CheckKeyboardControls()
 {
-    quiz_controls::ShiftEncoder encoder;
-    for(unsigned sample = 0; sample < 4; ++sample)
-        encoder.Update(false, false);
-    assert(encoder.Update(true, false) == 0);
-    assert(encoder.Update(false, false) == 0);
-    assert(encoder.Update(false, false) == 1);
-    assert(encoder.Update(false, true) == 0);
-    assert(encoder.Update(false, false) == 0);
-    assert(encoder.Update(false, false) == -1);
     PitchQuiz quiz;
     bool rising[40] = {};
     bool falling[40] = {};
@@ -537,10 +572,6 @@ void CheckKeyboardAndRangeControls()
     quiz_controls::Process(quiz, rising, false, 5, falling);
     assert(quiz.Process() == 0.0f);
 
-    quiz_controls::TurnRange(quiz, 3);
-    assert(quiz.Range() == 8);
-    quiz_controls::TurnRange(quiz, -10);
-    assert(quiz.Range() == 1);
     const auto ui = quiz_controls::PackUi(quiz, false);
     assert((ui >> 27) == 0);
     assert((ui & quiz_controls::kActiveMask) == 0);
@@ -561,79 +592,28 @@ unsigned TargetIndex(unsigned note, unsigned level)
     return index;
 }
 
-void CheckTargetRange()
+void CheckFixedTargetRange()
 {
-    for(unsigned range = 1; range <= 15; ++range)
-        for(unsigned white = 0; white < 15; ++white)
-        {
-            const auto color = quiz_display::RangeColor(white, range);
-            assert(color.blue == 0);
-            assert(color.red <= 48 && color.green <= 48);
-            assert((color.red != 0 || color.green != 0) == (white < range));
-        }
-    const auto easy = quiz_display::RangeColor(0, 15);
-    const auto middle = quiz_display::RangeColor(7, 15);
-    const auto hard = quiz_display::RangeColor(14, 15);
-    assert(easy.red == 0 && easy.green == 48);
-    assert(middle.red == 48 && middle.green == 24);
-    assert(hard.red == 48 && hard.green == 0);
-
-    PitchQuiz bounds;
-    assert(bounds.Range() == 5);
-    quiz_controls::TurnRange(bounds, 1);
-    assert(bounds.Range() == 6);
-    quiz_controls::TurnRange(bounds, -1);
-    assert(bounds.Range() == 5);
-    bounds.SetRange(0);
-    assert(bounds.Range() == 1);
-    quiz_controls::TurnRange(bounds, -1);
-    assert(bounds.Range() == 1);
-    bounds.SetRange(99);
-    assert(bounds.Range() == 15);
-    quiz_controls::TurnRange(bounds, 1);
-    assert(bounds.Range() == 15);
-
+    assert(PitchQuiz::kTargetRange == 5);
     for(unsigned level : {1u, 2u})
-        for(unsigned range : {1u, 5u, 8u, 15u})
-            for(uint32_t seed = 1; seed <= 8; ++seed)
+        for(uint32_t seed = 1; seed <= 8; ++seed)
+        {
+            PitchQuiz quiz;
+            assert(quiz.StartLevel(level, seed));
+            FinishSounds(quiz);
+            for(unsigned question = 0; question < PitchQuiz::kRoundLength - 1; ++question)
             {
-                PitchQuiz quiz;
-                quiz.SetRange(range);
-                assert(quiz.StartLevel(level, seed));
+                const unsigned previous = TargetIndex(quiz.Target(), level);
+                quiz.Press(quiz.Target());
                 FinishSounds(quiz);
-                for(unsigned question = 0; question < PitchQuiz::kRoundLength - 1; ++question)
-                {
-                    const unsigned previous = TargetIndex(quiz.Target(), level);
-                    quiz.Press(quiz.Target());
-                    FinishSounds(quiz);
-                    assert(quiz.Target() >= 48 && quiz.Target() <= 72);
-                    if(level == 1)
-                        assert(IsNaturalNote(quiz.Target()));
-                    const unsigned next = TargetIndex(quiz.Target(), level);
-                    assert((next > previous ? next - previous : previous - next) <= range);
-                }
-                assert(quiz.Range() == range);
-                quiz.Start(123);
-                assert(quiz.Range() == range);
+                assert(quiz.Target() >= 48 && quiz.Target() <= 72);
+                if(level == 1)
+                    assert(IsNaturalNote(quiz.Target()));
+                const unsigned next = TargetIndex(quiz.Target(), level);
+                assert((next > previous ? next - previous : previous - next)
+                       <= PitchQuiz::kTargetRange);
             }
-
-    bounds.SetRange(1);
-    bounds.Start(123);
-    FinishSounds(bounds);
-    const unsigned current = bounds.Target();
-    bounds.SetRange(8);
-    assert(bounds.Target() == current);
-    assert(bounds.StartLevel(2, 123));
-    assert(bounds.Range() == 8);
-    assert(bounds.StartLevel(1, 123));
-    FinishSounds(bounds);
-    for(unsigned question = 0; question < PitchQuiz::kRoundLength; ++question)
-    {
-        bounds.Press(bounds.Target());
-        FinishSounds(bounds);
     }
-    VerifyLevelCompletion(bounds);
-    assert(bounds.Range() == 8);
 }
 
 void CheckEveryLevelCompletion()
@@ -702,11 +682,10 @@ void CheckReplayAndExit()
     assert(quiz.ReplayTarget());
     assert(quiz.Attempts() == 1 && quiz.Target() == target);
     quiz.SetVolume(0.4f);
-    quiz.SetRange(8);
     quiz.ExitToIdle();
     assert(quiz.GetState() == PitchQuiz::State::Idle);
     assert(quiz.CurrentLevel() == 2 && quiz.Attempts() == 1);
-    assert(quiz.Volume() == 0.4f && quiz.Range() == 8);
+    assert(quiz.Volume() == 0.4f);
     assert(quiz.Process() == 0.0f);
     assert(!quiz.ReplayTarget());
     quiz.NoteOn(60);
@@ -833,11 +812,13 @@ int main()
     CheckReplayAndExit();
     CheckEveryLevelCompletion();
     CheckWaveformLowPass();
-    CheckTargetRange();
-    CheckKeyboardAndRangeControls();
+    CheckFixedTargetRange();
+    CheckKeyboardControls();
     CheckFreePlay();
     CheckGameModeVolume();
     CheckResultAnimations();
+    CheckLoopIndicator();
+    CheckAttemptColors();
     CheckControlRouting();
     CheckLevelRestarts();
     PitchQuiz selection_quiz;

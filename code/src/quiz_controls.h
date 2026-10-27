@@ -161,22 +161,18 @@ class Transport
 };
 
 static constexpr uint32_t kProgressMask = (1u << 20) - 1;
-inline void TurnRange(PitchQuiz& quiz, int turn)
-{
-    const int range = static_cast<int>(quiz.Range()) + turn;
-    quiz.SetRange(range < 1 ? 1 : static_cast<unsigned>(range));
-}
-
 static constexpr unsigned kLevelShift = 20;
 static constexpr uint32_t kShiftHeldMask = 1u << 24;
 static constexpr uint32_t kActiveMask = 1u << 25;
 static constexpr uint32_t kResultHoldMask = 1u << 26;
+static constexpr unsigned kWrongAttemptsShift = 27;
 
 inline uint32_t PackUi(const PitchQuiz& quiz, bool shift_held)
 {
     return quiz.Progress() | (quiz.CurrentLevel() << kLevelShift)
            | (shift_held ? kShiftHeldMask : 0)
            | (quiz.GetState() != PitchQuiz::State::Idle ? kActiveMask : 0)
-           | (quiz.GetState() == PitchQuiz::State::LevelComplete ? kResultHoldMask : 0);
+           | (quiz.GetState() == PitchQuiz::State::LevelComplete ? kResultHoldMask : 0)
+           | (quiz.PendingWrongAttempts() << kWrongAttemptsShift);
 }
 }

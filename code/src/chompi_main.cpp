@@ -13,17 +13,13 @@ namespace
 DaisySeed board;
 SaiHandle external_sai_handle;
 ShiftRegister4021<5> buttons;
-ShiftRegister4021<1> encoder_inputs;
-quiz_controls::ShiftEncoder range_encoder;
 PitchQuiz quiz;
 quiz_controls::Transport transport;
 std::atomic<uint32_t> ui_snapshot{1u << quiz_controls::kLevelShift};
 std::atomic<uint32_t> transport_snapshot{0};
 std::atomic<uint32_t> pressed_keys{0};
 std::atomic<uint32_t> volume_percent{25};
-std::atomic<uint32_t> range_setting{5};
 std::atomic<uint32_t> overlay_until{0};
-std::atomic<uint32_t> overlay_kind{0};
 bool shift_held = false;
 static_assert(ATOMIC_INT_LOCK_FREE == 2, "Audio requires lock-free progress updates");
 
@@ -111,20 +107,8 @@ void ScanControls()
         {
             volume_percent.store(static_cast<uint32_t>(volume), std::memory_order_relaxed);
             quiz.SetVolume(volume / 100.0f);
-            overlay_kind.store(1, std::memory_order_relaxed);
             overlay_until.store(System::GetNow() + 500, std::memory_order_relaxed);
         }
-    }
-
-    encoder_inputs.Update();
-    const int range_turn = range_encoder.Update(encoder_inputs.RawState(0),
-                                                encoder_inputs.RawState(1));
-    if(range_turn != 0)
-    {
-        quiz_controls::TurnRange(quiz, range_turn);
-        range_setting.store(quiz.Range(), std::memory_order_relaxed);
-        overlay_kind.store(3, std::memory_order_relaxed);
-        overlay_until.store(System::GetNow() + 500, std::memory_order_relaxed);
     }
 }
 
@@ -156,14 +140,14 @@ void ShutdownAndReset()
     for(uint32_t elapsed = 0; elapsed < 400; elapsed = System::GetNow() - start)
     {
         view.fade = static_cast<uint8_t>(elapsed * 48 / 400);
-        keyboard_leds::Show(0, 0, 0, false, 0, 1, false, false, 0, false, 5, view);
+        keyboard_leds::Show(0, 0, 0, false, 0, 1, false, false, 0, 0, false, 0, view);
         System::Delay(5);
     }
     view.shutdown = quiz_display::Shutdown::White;
-    keyboard_leds::Show(0, 0, 0, false, 0, 1, false, false, 0, false, 5, view);
+    keyboard_leds::Show(0, 0, 0, false, 0, 1, false, false, 0, 0, false, 0, view);
     System::Delay(120);
     view.shutdown = quiz_display::Shutdown::Dark;
-    keyboard_leds::Show(0, 0, 0, false, 0, 1, false, false, 0, false, 5, view);
+    keyboard_leds::Show(0, 0, 0, false, 0, 1, false, false, 0, 0, false, 0, view);
     System::Delay(80);
     NVIC_SystemReset();
 }
@@ -203,12 +187,6 @@ int main()
     controls.data[0] = seed::D9;
     controls.dbc_size = 8;
     buttons.Init(controls);
-    ShiftRegister4021<1>::Config encoder_controls = {};
-    encoder_controls.clk = seed::D22;
-    encoder_controls.latch = seed::D23;
-    encoder_controls.data[0] = seed::D19;
-    encoder_controls.dbc_size = 8;
-    encoder_inputs.Init(encoder_controls);
     volume_encoder.Init(seed::D15, seed::D17);
     quiz.SetVolume(0.25f);
     keyboard_leds::Init();
@@ -219,9 +197,9 @@ int main()
     uint32_t displayed_keys = 0;
     uint32_t displayed_volume = 25;
     bool displayed_volume_bar = false;
-    bool displayed_range_bar = false;
-    uint32_t displayed_range = 5;
     uint8_t displayed_play_blue = 6;
+    uint8_t displayed_loop_level = 0;
+    uint8_t displayed_shift_red = 0;
     bool was_result_hold = false;
     uint32_t result_started_at = 0;
     uint32_t displayed_result_frame = 0;
@@ -233,6 +211,8 @@ int main()
         const unsigned level = (current >> quiz_controls::kLevelShift) & 15;
         const bool show_levels = (current & quiz_controls::kShiftHeldMask) != 0;
         const bool result_hold = (current & quiz_controls::kResultHoldMask) != 0;
+        const unsigned wrong_attempts
+            = (current >> quiz_controls::kWrongAttemptsShift) & 3;
         const uint32_t now = System::GetNow();
         const uint32_t controls = transport_snapshot.load(std::memory_order_relaxed);
         if(controls & (1u << 6))
@@ -251,18 +231,17 @@ int main()
         const uint32_t keys = pressed_keys.load(std::memory_order_relaxed);
         const uint32_t volume = volume_percent.load(std::memory_order_relaxed);
         const uint32_t until = overlay_until.load(std::memory_order_relaxed);
-        const uint32_t overlay = overlay_kind.load(std::memory_order_relaxed);
         const bool overlay_active = static_cast<int32_t>(until - now) > 0;
-        const bool show_volume_bar = overlay_active && overlay == 1;
-        const bool show_range = overlay_active && overlay == 3;
-        const uint32_t range = range_setting.load(std::memory_order_relaxed);
+        const bool show_volume_bar = overlay_active;
         const bool active = (current & quiz_controls::kActiveMask) != 0;
         const uint32_t pulse_phase = System::GetNow() % 2000;
         const uint32_t pulse = pulse_phase < 1000 ? pulse_phase : 2000 - pulse_phase;
         const uint8_t play_blue = active ? 64 : static_cast<uint8_t>(6 + pulse * 14 / 1000);
+        const uint8_t loop_level = quiz_display::LoopColor(active, now).red;
+        const uint8_t shift_red = quiz_display::ShiftColor(now).red;
         if((current != displayed || keys != displayed_keys
             || volume != displayed_volume || show_volume_bar != displayed_volume_bar
-            || show_range != displayed_range_bar || range != displayed_range
+            || loop_level != displayed_loop_level || shift_red != displayed_shift_red
             || transport_frame != displayed_transport
             || play_blue != displayed_play_blue || result_frame != displayed_result_frame)
            && keyboard_leds::Show(progress,
@@ -274,17 +253,18 @@ int main()
                                   show_levels,
                                   result_hold,
                                   result_elapsed_ms,
-                                  show_range,
-                                  range,
+                                  wrong_attempts,
+                                  active,
+                                  now,
                                   transport_view))
         {
             displayed = current;
             displayed_keys = keys;
             displayed_volume = volume;
             displayed_volume_bar = show_volume_bar;
-            displayed_range_bar = show_range;
-            displayed_range = range;
             displayed_play_blue = play_blue;
+            displayed_loop_level = loop_level;
+            displayed_shift_red = shift_red;
             displayed_result_frame = result_frame;
             displayed_transport = transport_frame;
         }

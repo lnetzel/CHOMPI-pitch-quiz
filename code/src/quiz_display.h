@@ -37,20 +37,28 @@ inline Color ShutdownColor(const TransportView& transport, bool confirmation_key
     return {0, 0, 0};
 }
 
-inline Color RangeColor(unsigned white_key, unsigned range)
+inline Color LoopColor(bool game_active, uint32_t elapsed_ms)
 {
-    if(white_key >= 15 || white_key >= range)
+    if(!game_active)
         return {0, 0, 0};
-    if(white_key <= 7)
-        return {static_cast<uint8_t>(48 * white_key / 7),
-                static_cast<uint8_t>(48 - 24 * white_key / 7), 0};
-    return {48, static_cast<uint8_t>(24 * (14 - white_key) / 7), 0};
+    const unsigned phase = elapsed_ms % 2400;
+    const unsigned pulse = phase < 1200 ? phase : 2400 - phase;
+    const uint8_t level = static_cast<uint8_t>(4 + pulse * 44 / 1200);
+    return {level, level, 0};
+}
+
+inline Color ShiftColor(uint32_t elapsed_ms)
+{
+    const unsigned phase = elapsed_ms % 2400;
+    const unsigned pulse = phase < 1200 ? phase : 2400 - phase;
+    return {static_cast<uint8_t>(4 + pulse * 28 / 1200), 0, 0};
 }
 
 inline Color ResultColor(uint32_t progress,
                          unsigned led,
                          bool result_hold,
-                         uint32_t elapsed_ms)
+                         uint32_t elapsed_ms,
+                         unsigned wrong_attempts = 0)
 {
     if(led >= PitchQuiz::kRoundLength)
         return {0, 0, 0};
@@ -75,6 +83,18 @@ inline Color ResultColor(uint32_t progress,
 
     if(result_hold && (elapsed_ms / 250) % 2 != 0)
         return {0, 0, 0};
+
+    unsigned current_round = 0;
+    while(current_round < PitchQuiz::kRoundLength
+          && ((progress >> (2 * current_round)) & 3) != 0)
+        ++current_round;
+    if(!result_hold && led == current_round)
+    {
+        if(wrong_attempts == 1)
+            return {32, 32, 0};
+        if(wrong_attempts == 2)
+            return {48, 24, 0};
+    }
 
     const unsigned result = (progress >> (2 * led)) & 3;
     return {static_cast<uint8_t>(result == 2 ? 32 : 0),
