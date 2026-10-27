@@ -110,7 +110,7 @@ class PitchQuiz
                 const float fraction = static_cast<float>(position_) / length_;
                 frequency *= correct_ ? (1.0f + fraction) : (1.0f - 0.5f * fraction);
             }
-            sample = 0.22f * volume_ * envelope
+            sample = quiz_synth::FreePlay::kOutputGain * volume_ * envelope
                      * oscillator_.Process(frequency);
         }
 

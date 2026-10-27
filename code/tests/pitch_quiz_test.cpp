@@ -338,6 +338,21 @@ void CheckWaveforms()
     assert(std::fabs(energies[2] - energies[0]) > 0.5f);
 }
 
+void CheckGameModeVolume()
+{
+    PitchQuiz quiz;
+    quiz.SetVolume(1.0f);
+    quiz.Start(123);
+    float energy = 0.0f;
+    for(unsigned sample = 0; sample < PitchQuiz::kSampleRate; ++sample)
+    {
+        const float output = quiz.Process();
+        assert(std::fabs(output) <= quiz_synth::FreePlay::kOutputGain);
+        energy += output * output;
+    }
+    assert(energy > 1.0f);
+}
+
 void CheckFreePlay()
 {
     for(unsigned waveform = 0; waveform < quiz_synth::kWaveformCount; ++waveform)
@@ -758,6 +773,7 @@ int main()
     CheckTargetRange();
     CheckKeyboardAndWaveformControls();
     CheckFreePlay();
+    CheckGameModeVolume();
     CheckWaveforms();
     CheckResultAnimations();
     CheckControlRouting();

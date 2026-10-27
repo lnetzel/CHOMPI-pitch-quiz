@@ -63,6 +63,7 @@ class FreePlay
 {
   public:
     static constexpr unsigned kVoiceCount = 6;
+        static constexpr float kOutputGain = 0.22f / kVoiceCount;
     static constexpr unsigned kReleaseSamples = 24000;
     static constexpr unsigned kAttackSamples = 960;
     static constexpr unsigned kTransitionSamples = 240;
@@ -170,7 +171,7 @@ class FreePlay
             voice.last_output = sample;
             output += sample;
         }
-        return output * (0.22f / kVoiceCount);
+        return output * kOutputGain;
     }
 
   private:
