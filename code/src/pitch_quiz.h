@@ -10,9 +10,10 @@ class PitchQuiz
     static constexpr unsigned kRoundLength = 10;
     static constexpr unsigned kMaxAttempts = 3;
     static constexpr unsigned kSampleRate = 48000;
-    static constexpr float kReleaseSeconds = 0.5f;
+    static constexpr float kReleaseSeconds = 0.25f;
     static constexpr unsigned kLevelCount = 2;
     static constexpr unsigned kFeedbackFirstNoteSamples = 150 * kSampleRate / 1000;
+    static constexpr unsigned kFeedbackClickReleaseSamples = 10 * kSampleRate / 1000;
     static constexpr unsigned kFeedbackSustainSamples = 450 * kSampleRate / 1000;
     static constexpr unsigned kFeedbackReleaseSamples = 100 * kSampleRate / 1000;
     static constexpr unsigned kSuccessSignalSamples
@@ -27,7 +28,6 @@ class PitchQuiz
     void Start(uint32_t seed)
     {
         free_play_.Clear();
-        oscillator_.SetSquare(false);
         random_ = seed ? seed : 1;
         ResetLevel();
     }
@@ -47,21 +47,20 @@ class PitchQuiz
             return;
         correct_ = note == target_;
         ++attempts_;
-        Begin(State::Answer, 0.25f, Frequency(note), kReleaseSeconds);
+        Begin(State::Answer, 0.25f, note, kReleaseSeconds);
     }
 
     bool ReplayTarget()
     {
         if(state_ != State::Listening)
             return false;
-        Begin(State::Prompt, 0.7f, Frequency(target_), kReleaseSeconds);
+        Begin(State::Prompt, 0.7f, target_, kReleaseSeconds);
         return true;
     }
 
     void ExitToIdle()
     {
         free_play_.Clear();
-        oscillator_.SetSquare(false);
         state_ = State::Idle;
     }
 
@@ -86,37 +85,37 @@ class PitchQuiz
     }
 
     void NoteOff(unsigned note) { free_play_.NoteOff(note); }
-    void StopFreePlay() { free_play_.Clear(); }
+    void StopFreePlay() { free_play_.ClearHeld(); }
 
     float Process()
     {
         if(state_ == State::Idle)
             return volume_ * free_play_.Process();
-        if(state_ == State::Listening)
-            return 0.0f;
-
-        float sample = 0.0f;
         if(state_ == State::Feedback)
-            sample = FeedbackSample(position_, correct_);
+        {
+            if(position_ == 0)
+                StartFeedbackNote(correct_, false);
+            else if(position_ == kFeedbackFirstNoteSamples)
+                StartFeedbackNote(correct_, true);
+        }
         else if(state_ == State::LevelComplete && IsPerfectRound())
         {
             const unsigned replay_position = position_ % kPerfectReplayIntervalSamples;
-            if(position_ < 2 * kPerfectReplayIntervalSamples
-               && replay_position < kSuccessSignalSamples)
+            if(position_ < 2 * kPerfectReplayIntervalSamples)
             {
-                sample = FeedbackSample(replay_position, true);
+                if(replay_position == 0)
+                    StartFeedbackNote(true, false);
+                else if(replay_position == kFeedbackFirstNoteSamples)
+                    StartFeedbackNote(true, true);
             }
         }
-        else if(state_ != State::Pause && state_ != State::LevelComplete)
-        {
-            const float elapsed = static_cast<float>(position_) / kSampleRate;
-            const float envelope = elapsed < 0.01f ? elapsed / 0.01f : 1.0f;
-            sample = quiz_synth::FreePlay::kOutputGain * volume_ * envelope
-                     * oscillator_.Process(frequency_);
-        }
 
-        if(++position_ >= length_)
-            Advance();
+        const float sample = volume_ * free_play_.Process();
+        if(state_ != State::Idle && state_ != State::Listening)
+        {
+            if(++position_ >= length_)
+                Advance();
+        }
         return sample;
     }
 
@@ -148,34 +147,31 @@ class PitchQuiz
         return 440.0f * std::pow(2.0f, (static_cast<float>(note) - 69.0f) / 12.0f);
     }
 
-    float FeedbackSample(unsigned position, bool success)
+    void StartFeedbackNote(bool success, bool second)
     {
-        float envelope = position < kSampleRate / 100
-                             ? static_cast<float>(position) / (kSampleRate / 100)
-                             : 1.0f;
-        if(success && position >= kFeedbackSustainSamples)
-            envelope *= static_cast<float>(kSuccessSignalSamples - position)
-                        / kFeedbackReleaseSamples;
-        const unsigned note = position < kFeedbackFirstNoteSamples
-                                  ? (success ? 83 : 88) : (success ? 88 : 83);
-        return quiz_synth::FreePlay::kOutputGain * volume_ * envelope
-               * oscillator_.Process(Frequency(note));
+        const unsigned note = second ? (success ? 88 : 83) : (success ? 83 : 88);
+        const unsigned sustain = second ? kFeedbackSustainSamples - kFeedbackFirstNoteSamples
+                                        : kFeedbackFirstNoteSamples;
+        const unsigned release = second && success ? kFeedbackReleaseSamples
+                                                    : kFeedbackClickReleaseSamples;
+        free_play_.PlayNote(note, sustain, release, true);
     }
 
     bool IsPerfectRound() const { return progress_ == kPerfectProgress; }
 
     void Begin(State state,
                float sustain_seconds,
-               float frequency = 0.0f,
-               float release_seconds = 0.12f)
+               unsigned note = 128,
+               float release_seconds = 0.0f)
     {
         state_ = state;
         position_ = 0;
         sustain_length_ = static_cast<unsigned>(sustain_seconds * kSampleRate);
-        release_length_ = static_cast<unsigned>(release_seconds * kSampleRate);
-        length_ = sustain_length_ + release_length_;
-        frequency_ = frequency;
-        oscillator_.Reset();
+        length_ = sustain_length_;
+        if(note <= 127)
+            free_play_.PlayNote(note,
+                                sustain_length_,
+                                static_cast<unsigned>(release_seconds * kSampleRate));
     }
 
     void NextNote()
@@ -200,7 +196,7 @@ class PitchQuiz
         target_ = level_ == Level::Natural ? notes[target_index_] : 48 + target_index_;
         has_previous_target_ = true;
         attempts_ = 0;
-        Begin(State::Prompt, 0.7f, Frequency(target_), kReleaseSeconds);
+        Begin(State::Prompt, 0.7f, target_, kReleaseSeconds);
     }
 
     void Advance()
@@ -217,22 +213,16 @@ class PitchQuiz
                     progress_ |= static_cast<uint32_t>(result) << (2 * completed_);
                     ++completed_;
                 }
-                oscillator_.SetSquare(true);
-                Begin(State::Feedback,
-                      0.45f,
-                      0.0f,
-                      correct_ ? 0.1f : 0.0f);
+                Begin(State::Feedback, 0.45f);
                 break;
             case State::Feedback:
                 if(completed_ == kRoundLength)
                 {
-                    oscillator_.SetSquare(IsPerfectRound());
-                    Begin(State::LevelComplete, 2.0f, 0.0f, 0.0f);
+                    Begin(State::LevelComplete, 2.0f);
                 }
                 else
                 {
-                    oscillator_.SetSquare(false);
-                    Begin(State::Pause, 0.3f, 0.0f, 0.0f);
+                    Begin(State::Pause, 0.3f);
                 }
                 break;
             case State::Pause:
@@ -241,10 +231,9 @@ class PitchQuiz
                 else if(correct_ || attempts_ == kMaxAttempts)
                     NextNote();
                 else
-                    Begin(State::Prompt, 0.7f, Frequency(target_));
+                    Begin(State::Prompt, 0.7f, target_, kReleaseSeconds);
                 break;
             case State::LevelComplete:
-                oscillator_.SetSquare(false);
                 state_ = State::Idle;
                 break;
             default:
@@ -265,9 +254,6 @@ class PitchQuiz
     unsigned position_ = 0;
     unsigned length_ = 0;
     unsigned sustain_length_ = 0;
-    unsigned release_length_ = 0;
-    float frequency_ = 0.0f;
-    quiz_synth::Oscillator oscillator_;
     quiz_synth::FreePlay free_play_;
     float volume_ = 0.25f;
     bool correct_ = false;

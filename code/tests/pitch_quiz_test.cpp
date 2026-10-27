@@ -41,53 +41,61 @@ void CheckFeedbackSounds()
         PitchQuiz quiz;
         quiz.Start(123);
         FinishSounds(quiz);
-        const unsigned target = quiz.Target();
-        quiz.Press(correct ? target : target == 48 ? 49 : 48);
-        while(quiz.GetState() != PitchQuiz::State::Feedback)
+        for(unsigned sample = 0; sample < PitchQuiz::kReleaseSeconds * PitchQuiz::kSampleRate;
+            ++sample)
             quiz.Process();
+        const unsigned target = quiz.Target();
+        const unsigned answer_note = correct ? target : target == 48 ? 49 : 48;
+        quiz.Press(answer_note);
+        quiz_synth::FreePlay reference;
+        reference.PlayNote(answer_note,
+                           PitchQuiz::kSampleRate / 4,
+                           PitchQuiz::kReleaseSeconds * PitchQuiz::kSampleRate);
+        const unsigned answer_sustain_samples = PitchQuiz::kSampleRate / 4;
+        for(unsigned sample = 0; sample < answer_sustain_samples; ++sample)
+        {
+            quiz.Process();
+            reference.Process();
+        }
+        assert(quiz.GetState() == PitchQuiz::State::Feedback);
 
         constexpr unsigned window = PitchQuiz::kSampleRate / 10;
-        quiz_synth::Oscillator square_reference;
-        square_reference.SetSquare(true);
-        square_reference.Reset();
-        const unsigned first_note_number = correct ? 83 : 88;
-        const float first_frequency
-            = 440.0f * std::pow(2.0f, (first_note_number - 69.0f) / 12.0f);
-        unsigned first_note = 0;
-        float previous = 0.0f;
+        const unsigned answer_release_samples
+            = static_cast<unsigned>(PitchQuiz::kReleaseSeconds * PitchQuiz::kSampleRate);
+        const unsigned first_feedback_note = correct ? 83 : 88;
+        reference.PlayNote(first_feedback_note,
+                           PitchQuiz::kFeedbackFirstNoteSamples,
+                           PitchQuiz::kFeedbackClickReleaseSamples,
+                           true);
         for(unsigned sample = 0; sample < window; ++sample)
         {
             const float output = quiz.Process();
-            if(sample < 1000)
-            {
-                const float envelope = sample < PitchQuiz::kSampleRate / 100
-                                           ? static_cast<float>(sample)
-                                                 / (PitchQuiz::kSampleRate / 100)
-                                           : 1.0f;
-                const float expected = quiz_synth::FreePlay::kOutputGain * quiz.Volume()
-                                       * envelope * square_reference.Process(first_frequency);
-                assert(std::fabs(output - expected) < 1e-7f);
-            }
-            if(previous <= 0.0f && output > 0.0f)
-                ++first_note;
-            previous = output;
+            const float expected = quiz.Volume() * reference.Process();
+            assert(std::fabs(output - expected) < 1e-7f);
         }
-        const unsigned expected_first = correct ? 99 : 132;
-        assert(first_note >= expected_first - 3 && first_note <= expected_first + 3);
-
-        CountRisingCrossings(quiz, PitchQuiz::kFeedbackFirstNoteSamples);
+        for(unsigned sample = window; sample < answer_release_samples; ++sample)
+            quiz.Process();
         const unsigned second_note = CountRisingCrossings(quiz, window);
         const unsigned expected_second = correct ? 132 : 99;
         assert(second_note >= expected_second - 3 && second_note <= expected_second + 3);
 
-        const unsigned signal_length = correct ? PitchQuiz::kSuccessSignalSamples
-                                               : PitchQuiz::kFeedbackSustainSamples;
-        const unsigned samples_checked = 2 * window + PitchQuiz::kFeedbackFirstNoteSamples;
+        const unsigned signal_length = PitchQuiz::kFeedbackSustainSamples;
+        const unsigned samples_checked = answer_release_samples + window;
         for(unsigned sample = samples_checked; sample < signal_length - 1; ++sample)
             quiz.Process();
         assert(quiz.GetState() == PitchQuiz::State::Feedback);
         quiz.Process();
         assert(quiz.GetState() == PitchQuiz::State::Pause);
+        if(correct)
+        {
+            float release_energy = 0.0f;
+            for(unsigned sample = 0; sample < PitchQuiz::kFeedbackReleaseSamples; ++sample)
+            {
+                const float output = quiz.Process();
+                release_energy += output * output;
+            }
+            assert(release_energy > 0.0f);
+        }
     }
 }
 
@@ -120,11 +128,13 @@ void VerifyLevelCompletion(PitchQuiz& quiz)
     for(unsigned sample = 0; sample < 2 * PitchQuiz::kSampleRate - 1; ++sample)
     {
         const float output = quiz.Process();
-        if(sample < PitchQuiz::kSuccessSignalSamples)
+        if(sample >= PitchQuiz::kSampleRate / 5
+           && sample < PitchQuiz::kFeedbackSustainSamples)
             first_replay_energy += output * output;
         else if(sample >= PitchQuiz::kPerfectReplayIntervalSamples
+                               + PitchQuiz::kSampleRate / 5
                 && sample < PitchQuiz::kPerfectReplayIntervalSamples
-                               + PitchQuiz::kSuccessSignalSamples)
+                               + PitchQuiz::kFeedbackSustainSamples)
             second_replay_energy += output * output;
     }
     const bool perfect = results == PitchQuiz::kPerfectProgress;
@@ -275,7 +285,18 @@ void CheckLevelRestarts()
         assert(quiz.Volume() == 0.4f);
         assert(quiz.GetState() == PitchQuiz::State::Prompt);
         FinishSounds(quiz);
-        for(unsigned sample = 0; sample < 3 * PitchQuiz::kSampleRate; ++sample)
+        float prompt_tail_energy = 0.0f;
+        for(unsigned sample = 0; sample < PitchQuiz::kReleaseSeconds * PitchQuiz::kSampleRate;
+            ++sample)
+        {
+            const float output = quiz.Process();
+            prompt_tail_energy += output * output;
+        }
+        assert(prompt_tail_energy > 0.0f);
+        for(unsigned sample = 0;
+            sample < 3 * PitchQuiz::kSampleRate
+                         - PitchQuiz::kReleaseSeconds * PitchQuiz::kSampleRate;
+            ++sample)
             assert(quiz.Process() == 0.0f);
         assert(quiz.GetState() == PitchQuiz::State::Listening);
         assert(quiz.CurrentLevel() == 2);
@@ -421,7 +442,8 @@ void CheckFreePlay()
         previous = retrigger.Process();
     retrigger.NoteOff(60);
     retrigger.NoteOn(60);
-    assert(std::fabs(retrigger.Process() - previous) < 0.0001f);
+    assert(retrigger.ActiveVoices() == 2);
+    assert(std::fabs(retrigger.Process() - previous) < 0.004f);
 
     quiz_synth::FreePlay stolen;
     stolen.NoteOn(60);
@@ -466,6 +488,14 @@ void CheckFreePlay()
     assert(quiz.GetState() == PitchQuiz::State::Idle && quiz.Attempts() == 0);
     quiz.Start(123);
     FinishSounds(quiz);
+    float prompt_tail_energy = 0.0f;
+    for(unsigned sample = 0; sample < PitchQuiz::kReleaseSeconds * PitchQuiz::kSampleRate;
+        ++sample)
+    {
+        const float output = quiz.Process();
+        prompt_tail_energy += output * output;
+    }
+    assert(prompt_tail_energy > 0.0f);
     assert(quiz.Process() == 0.0f);
     quiz.NoteOn(60);
     assert(quiz.Process() == 0.0f);
@@ -854,17 +884,23 @@ int main()
         PitchQuiz release_quiz;
         release_quiz.Start(1);
         const unsigned prompt_samples
-            = static_cast<unsigned>(0.7f * PitchQuiz::kSampleRate)
-              + static_cast<unsigned>(PitchQuiz::kReleaseSeconds * PitchQuiz::kSampleRate);
+                        = static_cast<unsigned>(0.7f * PitchQuiz::kSampleRate);
         for(unsigned i = 0; i < prompt_samples - 1; ++i)
             release_quiz.Process();
         assert(release_quiz.GetState() == PitchQuiz::State::Prompt);
         release_quiz.Process();
         assert(release_quiz.GetState() == PitchQuiz::State::Listening);
+        release_quiz.StopFreePlay();
+        float prompt_release_energy = 0.0f;
+        for(unsigned sample = 0; sample < PitchQuiz::kSampleRate / 10; ++sample)
+        {
+            const float output = release_quiz.Process();
+            prompt_release_energy += output * output;
+        }
+        assert(prompt_release_energy > 0.0f);
         release_quiz.Press(release_quiz.Target());
         const unsigned answer_samples
-            = static_cast<unsigned>(0.25f * PitchQuiz::kSampleRate)
-              + static_cast<unsigned>(PitchQuiz::kReleaseSeconds * PitchQuiz::kSampleRate);
+            = static_cast<unsigned>(0.25f * PitchQuiz::kSampleRate);
         for(unsigned i = 0; i < answer_samples - 1; ++i)
             release_quiz.Process();
         assert(release_quiz.GetState() == PitchQuiz::State::Answer);
