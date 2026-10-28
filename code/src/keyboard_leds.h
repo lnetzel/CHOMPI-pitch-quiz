@@ -124,8 +124,9 @@ inline bool Show(uint32_t progress,
                  uint32_t pressed_keys,
                  uint32_t volume_percent,
                  bool show_volume_bar,
-                 uint8_t play_blue,
+                 quiz_display::Color play_color,
                  unsigned current_level,
+                 unsigned level_count,
                  bool shift_held,
                  bool result_hold = false,
                  uint32_t result_elapsed_ms = 0,
@@ -175,7 +176,7 @@ inline bool Show(uint32_t progress,
     if(shift_held)
         for(unsigned led = 0; led < 10; ++led)
         {
-            const uint8_t blue = led < PitchQuiz::kLevelCount
+            const uint8_t blue = led < level_count
                                      ? (led + 1 == current_level ? 64 : 8)
                                      : 0;
             EncodeLed(&symbols[kPadding + led * 24], 0, 0, blue);
@@ -225,7 +226,11 @@ inline bool Show(uint32_t progress,
     }
     else if(volume > 0.5f)
         red = level;
-    EncodePanelLed(panel_symbols, 7, 0, 0, play_blue);
+    EncodePanelLed(panel_symbols,
+                   7,
+                   play_color.red,
+                   play_color.green,
+                   play_color.blue);
     EncodePanelLed(panel_symbols, 9, red, green, 0);
     const auto loop_color = quiz_display::LoopColor(game_active, elapsed_ms);
     EncodePanelLed(panel_symbols, 8, loop_color.red, loop_color.green, loop_color.blue);

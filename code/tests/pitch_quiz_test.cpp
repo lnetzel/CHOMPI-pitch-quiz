@@ -249,7 +249,8 @@ void CheckControlRouting()
         rising[button] = true;
         quiz_controls::Process(quiz, rising, false, 456);
         rising[button] = false;
-        assert(quiz.CurrentLevel() == PitchQuiz::kLevelCount);
+        // Level 5 was selected above; PLAY/LOOP mid-round must not change it.
+        assert(quiz.CurrentLevel() == 5);
         assert(quiz.Completed() == 0 && quiz.Attempts() == 1);
         assert(quiz.GetState() == PitchQuiz::State::Answer);
     }
@@ -938,6 +939,150 @@ void CheckTransportGestures()
     assert(quiz.GetState() == PitchQuiz::State::Idle);
 }
 
+void CheckChordsMode()
+{
+    static constexpr unsigned chord_voices[] = {2, 2, 2, 2, 2, 3, 3, 3};
+    for(unsigned level = 1; level <= PitchQuiz::kChordsLevelCount; ++level)
+        for(uint32_t seed = 1; seed <= 64; ++seed)
+        {
+            PitchQuiz quiz;
+            quiz.SetMode(PitchQuiz::Mode::Chords);
+            assert(quiz.StartLevel(level, seed));
+            assert(quiz.CurrentMode() == PitchQuiz::Mode::Chords);
+            assert(quiz.CurrentLevelCount() == PitchQuiz::kChordsLevelCount);
+            assert(quiz.TargetVoiceCount() == chord_voices[level - 1]);
+            assert(quiz.TargetRangeDifficulty() == 0);
+            assert(quiz.UsesBlackKeys());
+            FinishSounds(quiz);
+            for(unsigned question = 0; question < PitchQuiz::kRoundLength; ++question)
+            {
+                const unsigned root = quiz.TargetNote(0);
+                assert(root >= 48 && root <= 72);
+                if(level == 1)
+                    assert(IsNaturalNote(root));
+                const unsigned second = quiz.TargetNote(1) - root;
+                switch(level)
+                {
+                    case 1:
+                    case 2:
+                        assert(second == 7);
+                        break;
+                    case 3:
+                        assert(second == 4);
+                        break;
+                    case 4:
+                        assert(second == 3);
+                        break;
+                    case 5:
+                        assert(second == 3 || second == 4);
+                        break;
+                    case 6:
+                        assert(second == 4);
+                        break;
+                    case 7:
+                        assert(second == 3);
+                        break;
+                    default:
+                        assert(second == 3 || second == 4);
+                        break;
+                }
+                if(chord_voices[level - 1] == 3)
+                    assert(quiz.TargetNote(2) - root == 7);
+                assert(quiz.TargetNote(chord_voices[level - 1] - 1) <= 72);
+                AnswerTarget(quiz);
+                FinishSounds(quiz);
+            }
+            assert(quiz.GetState() == PitchQuiz::State::LevelComplete);
+        }
+
+    // Mixed levels pick both qualities across seeds.
+    for(unsigned level : {5u, 8u})
+    {
+        bool saw_major = false;
+        bool saw_minor = false;
+        for(uint32_t seed = 1; seed <= 64 && !(saw_major && saw_minor); ++seed)
+        {
+            PitchQuiz quiz;
+            quiz.SetMode(PitchQuiz::Mode::Chords);
+            assert(quiz.StartLevel(level, seed));
+            const unsigned second = quiz.TargetNote(1) - quiz.TargetNote(0);
+            saw_major |= second == 4;
+            saw_minor |= second == 3;
+        }
+        assert(saw_major && saw_minor);
+    }
+
+    // Level 2 reaches black-key roots across seeds (level 1 never does).
+    bool saw_black_root = false;
+    for(uint32_t seed = 1; seed <= 64; ++seed)
+    {
+        PitchQuiz quiz;
+        quiz.SetMode(PitchQuiz::Mode::Chords);
+        assert(quiz.StartLevel(2, seed));
+        saw_black_root |= !IsNaturalNote(quiz.TargetNote(0));
+    }
+    assert(saw_black_root);
+
+    // Switching modes exits to idle; staying in the mode is a no-op.
+    PitchQuiz quiz;
+    quiz.SetMode(PitchQuiz::Mode::Chords);
+    assert(quiz.StartLevel(3, 123));
+    FinishSounds(quiz);
+    assert(quiz.GetState() == PitchQuiz::State::Listening);
+    quiz.SetMode(PitchQuiz::Mode::Chords);
+    assert(quiz.GetState() == PitchQuiz::State::Listening);
+    quiz.SetMode(PitchQuiz::Mode::PerfectPitch);
+    assert(quiz.CurrentMode() == PitchQuiz::Mode::PerfectPitch);
+    assert(quiz.GetState() == PitchQuiz::State::Idle);
+    assert(quiz.CurrentLevelCount() == PitchQuiz::kLevelCount);
+
+    // A level above the chords count clamps when switching to Chords mode.
+    assert(quiz.StartLevel(10, 1));
+    quiz.SetMode(PitchQuiz::Mode::Chords);
+    assert(quiz.CurrentLevel() == PitchQuiz::kChordsLevelCount);
+    assert(quiz.GetState() == PitchQuiz::State::Idle);
+
+    // Chords mode accepts levels 1-8 only; Perfect Pitch accepts 1-10.
+    assert(!quiz.StartLevel(9, 1));
+    assert(!quiz.StartLevel(0, 1));
+    assert(quiz.StartLevel(8, 1));
+    quiz.SetMode(PitchQuiz::Mode::PerfectPitch);
+    assert(quiz.StartLevel(10, 1));
+
+    // Level select routing honors the per-mode level count.
+    PitchQuiz routing;
+    routing.SetMode(PitchQuiz::Mode::Chords);
+    bool rising[40] = {};
+    rising[quiz_controls::kBlackKeySwitches[7]] = true;
+    quiz_controls::Process(routing, rising, true, 1);
+    assert(routing.CurrentLevel() == 8);
+    assert(routing.GetState() == PitchQuiz::State::Prompt);
+    rising[quiz_controls::kBlackKeySwitches[7]] = false;
+    FinishSounds(routing);
+    rising[quiz_controls::kBlackKeySwitches[8]] = true;
+    quiz_controls::Process(routing, rising, true, 2);
+    rising[quiz_controls::kBlackKeySwitches[8]] = false;
+    assert(routing.CurrentLevel() == 8);
+    assert(routing.GetState() == PitchQuiz::State::Listening);
+
+    // The UI snapshot carries the mode for the display.
+    assert(quiz_controls::PackUi(routing, true) & quiz_controls::kChordsModeMask);
+    routing.SetMode(PitchQuiz::Mode::PerfectPitch);
+    assert((quiz_controls::PackUi(routing, true) & quiz_controls::kChordsModeMask) == 0);
+
+    // PLAY LED: blue pulse in Perfect Pitch, green pulse in Chords.
+    const auto pp_idle = quiz_display::PlayColor(false, false, 0);
+    assert(pp_idle.red == 0 && pp_idle.green == 0 && pp_idle.blue == 6);
+    const auto pp_peak = quiz_display::PlayColor(false, false, 1000);
+    assert(pp_peak.red == 0 && pp_peak.green == 0 && pp_peak.blue == 20);
+    const auto pp_active = quiz_display::PlayColor(true, false, 0);
+    assert(pp_active.red == 0 && pp_active.green == 0 && pp_active.blue == 64);
+    const auto chords_idle = quiz_display::PlayColor(false, true, 0);
+    assert(chords_idle.red == 0 && chords_idle.green == 6 && chords_idle.blue == 0);
+    const auto chords_active = quiz_display::PlayColor(true, true, 0);
+    assert(chords_active.red == 0 && chords_active.green == 64 && chords_active.blue == 0);
+}
+
 int main()
 {
     CheckFeedbackSounds();
@@ -955,6 +1100,7 @@ int main()
     CheckControlRouting();
     CheckLevelRestarts();
         CheckMultiVoiceChordInput();
+        CheckChordsMode();
         PitchQuiz selection_quiz;
     assert(selection_quiz.CurrentLevel() == 1);
     bool selected_notes[25] = {};

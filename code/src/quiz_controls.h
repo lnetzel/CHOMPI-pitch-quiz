@@ -5,6 +5,8 @@
 namespace quiz_controls
 {
 static constexpr unsigned kShiftSwitch = 5;
+// SW_TOG next to SHIFT: down = Perfect Pitch mode, up = Chords mode.
+static constexpr unsigned kModeToggleSwitch = 6;
 static constexpr unsigned kPlaySwitch = 33;
 static constexpr unsigned kLoopSwitch = 34;
 static constexpr unsigned kKeySwitches[25] = {
@@ -15,6 +17,7 @@ static constexpr unsigned kBlackKeySwitches[10] = {
     7, 12, 13, 14, 21, 22, 23, 29, 30, 31
 };
 static_assert(PitchQuiz::kLevelCount <= 10, "Level selection has ten black keys");
+static_assert(PitchQuiz::kChordsLevelCount <= 10, "Level selection has ten black keys");
 
 class ShiftEncoder
 {
@@ -50,7 +53,7 @@ inline void Process(PitchQuiz& quiz,
     if(shift_held && rising[kLoopSwitch])
         return;
     if(shift_held)
-        for(unsigned level = 0; level < PitchQuiz::kLevelCount; ++level)
+        for(unsigned level = 0; level < quiz.CurrentLevelCount(); ++level)
             if(rising[kBlackKeySwitches[level]])
             {
                 quiz.StartLevel(level + 1, seed);
@@ -166,6 +169,7 @@ static constexpr uint32_t kShiftHeldMask = 1u << 24;
 static constexpr uint32_t kActiveMask = 1u << 25;
 static constexpr uint32_t kResultHoldMask = 1u << 26;
 static constexpr unsigned kWrongAttemptsShift = 27;
+static constexpr uint32_t kChordsModeMask = 1u << 29;
 
 inline uint32_t PackUi(const PitchQuiz& quiz, bool shift_held)
 {
@@ -173,6 +177,7 @@ inline uint32_t PackUi(const PitchQuiz& quiz, bool shift_held)
            | (shift_held ? kShiftHeldMask : 0)
            | (quiz.GetState() != PitchQuiz::State::Idle ? kActiveMask : 0)
            | (quiz.GetState() == PitchQuiz::State::LevelComplete ? kResultHoldMask : 0)
-           | (quiz.PendingWrongAttempts() << kWrongAttemptsShift);
+           | (quiz.PendingWrongAttempts() << kWrongAttemptsShift)
+           | (quiz.CurrentMode() == PitchQuiz::Mode::Chords ? kChordsModeMask : 0);
 }
 }

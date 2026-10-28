@@ -11,6 +11,7 @@ class PitchQuiz
     static constexpr unsigned kMaxAttempts = 3;
     static constexpr unsigned kSampleRate = 48000;
     static constexpr unsigned kLevelCount = 10;
+    static constexpr unsigned kChordsLevelCount = 8;
     static constexpr float kReleaseSeconds = 0.25f;
     static constexpr unsigned kFeedbackFirstNoteSamples = 150 * kSampleRate / 1000;
     static constexpr unsigned kFeedbackClickReleaseSamples = 10 * kSampleRate / 1000;
@@ -23,6 +24,8 @@ class PitchQuiz
 
     enum class State { Idle, Prompt, Listening, Answer, Feedback, Pause, LevelComplete };
     enum class Result { Pending, Correct, Wrong };
+    // PerfectPitch: toggle DOWN. Chords: toggle UP (intervals and triads).
+    enum class Mode { PerfectPitch, Chords };
 
     void Start(uint32_t seed)
     {
@@ -34,11 +37,29 @@ class PitchQuiz
 
     bool StartLevel(unsigned level, uint32_t seed)
     {
-        if(level == 0 || level > kLevelCount)
+        if(level == 0 || level > CurrentLevelCount())
             return false;
         level_ = level;
         Start(seed);
         return true;
+    }
+
+    // Flipping the mode toggle exits the current round immediately.
+    void SetMode(Mode mode)
+    {
+        if(mode == mode_)
+            return;
+        mode_ = mode;
+        if(level_ > CurrentLevelCount())
+            level_ = CurrentLevelCount();
+        ExitToIdle();
+    }
+
+    Mode CurrentMode() const { return mode_; }
+
+    unsigned CurrentLevelCount() const
+    {
+        return mode_ == Mode::Chords ? kChordsLevelCount : kLevelCount;
     }
 
     void Press(unsigned note)
@@ -166,13 +187,26 @@ class PitchQuiz
     State GetState() const { return state_; }
     unsigned CurrentLevel() const { return level_; }
     unsigned Target() const { return target_notes_[0]; }
-    unsigned TargetVoiceCount() const { return VoiceCountFor(level_); }
+    unsigned TargetVoiceCount() const
+    {
+        return mode_ == Mode::Chords ? ChordsVoiceCountFor(level_)
+                                     : VoiceCountFor(level_);
+    }
     unsigned TargetNote(unsigned voice) const
     {
         return voice < TargetVoiceCount() ? target_notes_[voice] : 0;
     }
-    unsigned TargetRangeDifficulty() const { return RangeFor(level_); }
-    bool UsesBlackKeys() const { return HasBlackKeys(level_); }
+    unsigned TargetRangeDifficulty() const
+    {
+        // Chords mode has no range constraint: roots jump freely.
+        return mode_ == Mode::Chords ? 0 : RangeFor(level_);
+    }
+    bool UsesBlackKeys() const
+    {
+        // Chords-mode targets may include black keys at every level; only the
+        // level-1 root is restricted to white keys.
+        return mode_ == Mode::Chords ? true : HasBlackKeys(level_);
+    }
     unsigned Attempts() const { return attempts_; }
     unsigned PendingWrongAttempts() const
     {
@@ -225,6 +259,11 @@ class PitchQuiz
         return 3;
     }
 
+    static unsigned ChordsVoiceCountFor(unsigned level)
+    {
+        return level <= 5 ? 2 : 3;
+    }
+
     static unsigned RangeFor(unsigned level)
     {
         if(level == 2 || level == 4 || level == 6 || level == 8 || level == 9)
@@ -245,14 +284,19 @@ class PitchQuiz
         return random_ % limit;
     }
 
-    unsigned NoteFromIndex(unsigned index) const
+    static unsigned WhiteNote(unsigned index)
     {
-        if(HasBlackKeys(level_))
-            return 48 + index;
         static constexpr unsigned white_notes[] = {
             48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72
         };
         return white_notes[index];
+    }
+
+    unsigned NoteFromIndex(unsigned index) const
+    {
+        if(HasBlackKeys(level_))
+            return 48 + index;
+        return WhiteNote(index);
     }
 
     void Begin(State state,
@@ -280,6 +324,19 @@ class PitchQuiz
     }
 
     void NextNote()
+    {
+        if(mode_ == Mode::Chords)
+            NextChordTarget();
+        else
+            NextPitchTarget();
+        has_previous_target_ = true;
+        attempts_ = 0;
+        pressed_chord_mask_ = 0;
+        pressed_chord_count_ = 0;
+        BeginTarget(State::Prompt, 0.7f, kReleaseSeconds);
+    }
+
+    void NextPitchTarget()
     {
         const unsigned count = HasBlackKeys(level_) ? 25 : 15;
         const unsigned range = RangeFor(level_);
@@ -309,11 +366,39 @@ class PitchQuiz
             while(already_used);
             target_notes_[voice] = NoteFromIndex(index);
         }
-        has_previous_target_ = true;
-        attempts_ = 0;
-        pressed_chord_mask_ = 0;
-        pressed_chord_count_ = 0;
-        BeginTarget(State::Prompt, 0.7f, kReleaseSeconds);
+    }
+
+    // Chords mode (levels.md): a random root plus fixed intervals above it.
+    // Levels 1-2 perfect fifths, 3 major thirds, 4 minor thirds, 5 both,
+    // 6 major triads, 7 minor triads, 8 both. Level 1 uses white-key roots.
+    void NextChordTarget()
+    {
+        unsigned second = 7;
+        if(level_ == 3 || level_ == 6)
+            second = 4;
+        else if(level_ == 4 || level_ == 7)
+            second = 3;
+        else if(level_ == 5 || level_ == 8)
+            second = RandomBelow(2) == 0 ? 4 : 3;
+        const bool three_voices = level_ > 5;
+        const unsigned top = three_voices ? 7 : second;
+        const unsigned root_max = 72 - top;
+        unsigned root = 48;
+        if(level_ == 1)
+        {
+            unsigned white_count = 0;
+            while(white_count < 15 && WhiteNote(white_count) <= root_max)
+                ++white_count;
+            root = WhiteNote(RandomBelow(white_count));
+        }
+        else
+        {
+            root = 48 + RandomBelow(root_max - 48 + 1);
+        }
+        target_notes_[0] = root;
+        target_notes_[1] = root + second;
+        if(three_voices)
+            target_notes_[2] = root + 7;
     }
 
     void Advance()
@@ -359,6 +444,7 @@ class PitchQuiz
     }
 
     State state_ = State::Idle;
+    Mode mode_ = Mode::PerfectPitch;
     unsigned level_ = 1;
     uint32_t random_ = 1;
     uint32_t progress_ = 0;

@@ -90,6 +90,8 @@ void ScanControls()
     pressed_keys.store(key_mask, std::memory_order_relaxed);
 
     shift_held = held[quiz_controls::kShiftSwitch];
+    quiz.SetMode(held[quiz_controls::kModeToggleSwitch] ? PitchQuiz::Mode::Chords
+                                                        : PitchQuiz::Mode::PerfectPitch);
     const uint32_t now = System::GetNow();
     if(!transport.Update(quiz, rising, held, now))
         quiz_controls::Process(quiz, rising, shift_held, now, falling);
@@ -140,14 +142,53 @@ void ShutdownAndReset()
     for(uint32_t elapsed = 0; elapsed < 400; elapsed = System::GetNow() - start)
     {
         view.fade = static_cast<uint8_t>(elapsed * 48 / 400);
-        keyboard_leds::Show(0, 0, 0, false, 0, 1, false, false, 0, 0, false, 0, view);
+        keyboard_leds::Show(0,
+                            0,
+                            0,
+                            false,
+                            {0, 0, 0},
+                            1,
+                            PitchQuiz::kLevelCount,
+                            false,
+                            false,
+                            0,
+                            0,
+                            false,
+                            0,
+                            view);
         System::Delay(5);
     }
     view.shutdown = quiz_display::Shutdown::White;
-    keyboard_leds::Show(0, 0, 0, false, 0, 1, false, false, 0, 0, false, 0, view);
+    keyboard_leds::Show(0,
+                        0,
+                        0,
+                        false,
+                        {0, 0, 0},
+                        1,
+                        PitchQuiz::kLevelCount,
+                        false,
+                        false,
+                        0,
+                        0,
+                        false,
+                        0,
+                        view);
     System::Delay(120);
     view.shutdown = quiz_display::Shutdown::Dark;
-    keyboard_leds::Show(0, 0, 0, false, 0, 1, false, false, 0, 0, false, 0, view);
+    keyboard_leds::Show(0,
+                        0,
+                        0,
+                        false,
+                        {0, 0, 0},
+                        1,
+                        PitchQuiz::kLevelCount,
+                        false,
+                        false,
+                        0,
+                        0,
+                        false,
+                        0,
+                        view);
     System::Delay(80);
     NVIC_SystemReset();
 }
@@ -190,14 +231,14 @@ int main()
     volume_encoder.Init(seed::D15, seed::D17);
     quiz.SetVolume(0.25f);
     keyboard_leds::Init();
-    keyboard_leds::Show(0, 0, 25, false, 6, 1, false);
+    keyboard_leds::Show(0, 0, 25, false, {0, 0, 6}, 1, PitchQuiz::kLevelCount, false);
     board.StartAudio(AudioCallback);
 
     uint32_t displayed = 1u << quiz_controls::kLevelShift;
     uint32_t displayed_keys = 0;
     uint32_t displayed_volume = 25;
     bool displayed_volume_bar = false;
-    uint8_t displayed_play_blue = 6;
+    uint32_t displayed_play_color = 6;
     uint8_t displayed_loop_level = 0;
     uint8_t displayed_shift_red = 0;
     bool was_result_hold = false;
@@ -234,22 +275,29 @@ int main()
         const bool overlay_active = static_cast<int32_t>(until - now) > 0;
         const bool show_volume_bar = overlay_active;
         const bool active = (current & quiz_controls::kActiveMask) != 0;
-        const uint32_t pulse_phase = System::GetNow() % 2000;
-        const uint32_t pulse = pulse_phase < 1000 ? pulse_phase : 2000 - pulse_phase;
-        const uint8_t play_blue = active ? 64 : static_cast<uint8_t>(6 + pulse * 14 / 1000);
+        const bool chords_mode = (current & quiz_controls::kChordsModeMask) != 0;
+        const unsigned level_count = chords_mode ? PitchQuiz::kChordsLevelCount
+                                                 : PitchQuiz::kLevelCount;
+        const quiz_display::Color play_color
+            = quiz_display::PlayColor(active, chords_mode, now);
+        const uint32_t play_color_packed = (static_cast<uint32_t>(play_color.red) << 16)
+                                           | (static_cast<uint32_t>(play_color.green) << 8)
+                                           | play_color.blue;
         const uint8_t loop_level = quiz_display::LoopColor(active, now).red;
         const uint8_t shift_red = quiz_display::ShiftColor(now).red;
         if((current != displayed || keys != displayed_keys
             || volume != displayed_volume || show_volume_bar != displayed_volume_bar
             || loop_level != displayed_loop_level || shift_red != displayed_shift_red
             || transport_frame != displayed_transport
-            || play_blue != displayed_play_blue || result_frame != displayed_result_frame)
+            || play_color_packed != displayed_play_color
+            || result_frame != displayed_result_frame)
            && keyboard_leds::Show(progress,
                                   keys,
                                   volume,
                                   show_volume_bar,
-                                  play_blue,
+                                  play_color,
                                   level,
+                                  level_count,
                                   show_levels,
                                   result_hold,
                                   result_elapsed_ms,
@@ -262,7 +310,7 @@ int main()
             displayed_keys = keys;
             displayed_volume = volume;
             displayed_volume_bar = show_volume_bar;
-            displayed_play_blue = play_blue;
+            displayed_play_color = play_color_packed;
             displayed_loop_level = loop_level;
             displayed_shift_red = shift_red;
             displayed_result_frame = result_frame;

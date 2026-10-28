@@ -47,6 +47,16 @@ inline Color LoopColor(bool game_active, uint32_t elapsed_ms)
     return {level, level, 0};
 }
 
+// PLAY LED: blue pulse in Perfect Pitch mode, green pulse in Chords mode.
+inline Color PlayColor(bool game_active, bool chords_mode, uint32_t elapsed_ms)
+{
+    const unsigned phase = elapsed_ms % 2000;
+    const unsigned pulse = phase < 1000 ? phase : 2000 - phase;
+    const uint8_t level
+        = game_active ? 64 : static_cast<uint8_t>(6 + pulse * 14 / 1000);
+    return chords_mode ? Color{0, level, 0} : Color{0, 0, level};
+}
+
 inline Color ShiftColor(uint32_t elapsed_ms)
 {
     const unsigned phase = elapsed_ms % 2400;
