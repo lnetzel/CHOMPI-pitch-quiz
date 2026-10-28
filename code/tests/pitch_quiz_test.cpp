@@ -941,7 +941,9 @@ void CheckTransportGestures()
 
 void CheckChordsMode()
 {
-    static constexpr unsigned chord_voices[] = {2, 2, 2, 2, 2, 3, 3, 3};
+    static constexpr unsigned chord_voices[] = {2, 2, 2, 2, 2, 3, 3, 3, 3, 5};
+    unsigned inversion_seen = 0;
+    unsigned ninth_chord_seen = 0;
     for(unsigned level = 1; level <= PitchQuiz::kChordsLevelCount; ++level)
         for(uint32_t seed = 1; seed <= 64; ++seed)
         {
@@ -961,39 +963,86 @@ void CheckChordsMode()
                 if(level == 1)
                     assert(IsNaturalNote(root));
                 const unsigned second = quiz.TargetNote(1) - root;
-                switch(level)
+                if(level == 9)
                 {
-                    case 1:
-                    case 2:
-                        assert(second == 7);
-                        break;
-                    case 3:
-                        assert(second == 4);
-                        break;
-                    case 4:
-                        assert(second == 3);
-                        break;
-                    case 5:
-                        assert(second == 3 || second == 4);
-                        break;
-                    case 6:
-                        assert(second == 4);
-                        break;
-                    case 7:
-                        assert(second == 3);
-                        break;
-                    default:
-                        assert(second == 3 || second == 4);
-                        break;
+                    // Triad voicings above the bass: 0-1 root position major/minor,
+                    // 2-3 first inversion, 4-5 second inversion.
+                    const unsigned top = quiz.TargetNote(2) - root;
+                    unsigned combo = 6;
+                    if(top == 7 && second == 4)
+                        combo = 0;
+                    else if(top == 7 && second == 3)
+                        combo = 1;
+                    else if(second == 3 && top == 8)
+                        combo = 2;
+                    else if(second == 4 && top == 9)
+                        combo = 3;
+                    else if(second == 5 && top == 9)
+                        combo = 4;
+                    else if(second == 5 && top == 8)
+                        combo = 5;
+                    assert(combo < 6);
+                    inversion_seen |= 1u << combo;
                 }
-                if(chord_voices[level - 1] == 3)
-                    assert(quiz.TargetNote(2) - root == 7);
+                else if(level == 10)
+                {
+                    static constexpr uint8_t ninth_chords[5][4] = {
+                        {4, 7, 11, 14}, {3, 7, 10, 14}, {4, 7, 10, 14},
+                        {3, 6, 10, 14}, {4, 7, 10, 13},
+                    };
+                    unsigned chord = 5;
+                    for(unsigned candidate = 0; candidate < 5 && chord == 5; ++candidate)
+                    {
+                        bool match = true;
+                        for(unsigned voice = 1; voice < 5; ++voice)
+                            match &= quiz.TargetNote(voice) - root
+                                     == ninth_chords[candidate][voice - 1];
+                        if(match)
+                            chord = candidate;
+                    }
+                    assert(chord < 5);
+                    ninth_chord_seen |= 1u << chord;
+                }
+                else
+                {
+                    switch(level)
+                    {
+                        case 1:
+                        case 2:
+                            assert(second == 7);
+                            break;
+                        case 3:
+                            assert(second == 4);
+                            break;
+                        case 4:
+                            assert(second == 3);
+                            break;
+                        case 5:
+                            assert(second == 3 || second == 4);
+                            break;
+                        case 6:
+                            assert(second == 4);
+                            break;
+                        case 7:
+                            assert(second == 3);
+                            break;
+                        default:
+                            assert(second == 3 || second == 4);
+                            break;
+                    }
+                    if(chord_voices[level - 1] == 3)
+                        assert(quiz.TargetNote(2) - root == 7);
+                }
                 assert(quiz.TargetNote(chord_voices[level - 1] - 1) <= 72);
                 AnswerTarget(quiz);
                 FinishSounds(quiz);
             }
             assert(quiz.GetState() == PitchQuiz::State::LevelComplete);
         }
+
+    // Level 9 covers every quality/inversion combo, level 10 every chord type.
+    assert(inversion_seen == 0x3f);
+    assert(ninth_chord_seen == 0x1f);
 
     // Mixed levels pick both qualities across seeds.
     for(unsigned level : {5u, 8u})
@@ -1036,16 +1085,16 @@ void CheckChordsMode()
     assert(quiz.GetState() == PitchQuiz::State::Idle);
     assert(quiz.CurrentLevelCount() == PitchQuiz::kLevelCount);
 
-    // A level above the chords count clamps when switching to Chords mode.
+    // Level 10 exists in both modes, so it carries across the switch.
     assert(quiz.StartLevel(10, 1));
     quiz.SetMode(PitchQuiz::Mode::Chords);
     assert(quiz.CurrentLevel() == PitchQuiz::kChordsLevelCount);
     assert(quiz.GetState() == PitchQuiz::State::Idle);
 
-    // Chords mode accepts levels 1-8 only; Perfect Pitch accepts 1-10.
-    assert(!quiz.StartLevel(9, 1));
+    // Both modes accept levels 1-10 and reject 0 and 11.
+    assert(quiz.StartLevel(9, 1));
+    assert(!quiz.StartLevel(11, 1));
     assert(!quiz.StartLevel(0, 1));
-    assert(quiz.StartLevel(8, 1));
     quiz.SetMode(PitchQuiz::Mode::PerfectPitch);
     assert(quiz.StartLevel(10, 1));
 
@@ -1062,8 +1111,8 @@ void CheckChordsMode()
     rising[quiz_controls::kBlackKeySwitches[8]] = true;
     quiz_controls::Process(routing, rising, true, 2);
     rising[quiz_controls::kBlackKeySwitches[8]] = false;
-    assert(routing.CurrentLevel() == 8);
-    assert(routing.GetState() == PitchQuiz::State::Listening);
+    assert(routing.CurrentLevel() == 9);
+    assert(routing.GetState() == PitchQuiz::State::Prompt);
 
     // The UI snapshot carries the mode for the display.
     assert(quiz_controls::PackUi(routing, true) & quiz_controls::kChordsModeMask);

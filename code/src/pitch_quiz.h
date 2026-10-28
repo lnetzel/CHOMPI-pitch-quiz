@@ -11,7 +11,7 @@ class PitchQuiz
     static constexpr unsigned kMaxAttempts = 3;
     static constexpr unsigned kSampleRate = 48000;
     static constexpr unsigned kLevelCount = 10;
-    static constexpr unsigned kChordsLevelCount = 8;
+    static constexpr unsigned kChordsLevelCount = 10;
     static constexpr float kReleaseSeconds = 0.25f;
     static constexpr unsigned kFeedbackFirstNoteSamples = 150 * kSampleRate / 1000;
     static constexpr unsigned kFeedbackClickReleaseSamples = 10 * kSampleRate / 1000;
@@ -261,7 +261,11 @@ class PitchQuiz
 
     static unsigned ChordsVoiceCountFor(unsigned level)
     {
-        return level <= 5 ? 2 : 3;
+        if(level <= 5)
+            return 2;
+        if(level >= 10)
+            return 5;
+        return 3;
     }
 
     static unsigned RangeFor(unsigned level)
@@ -371,8 +375,19 @@ class PitchQuiz
     // Chords mode (levels.md): a random root plus fixed intervals above it.
     // Levels 1-2 perfect fifths, 3 major thirds, 4 minor thirds, 5 both,
     // 6 major triads, 7 minor triads, 8 both. Level 1 uses white-key roots.
+    // Level 9 adds triad inversions, level 10 is five-voice ninth chords.
     void NextChordTarget()
     {
+        if(level_ == 9)
+        {
+            NextInversionTarget();
+            return;
+        }
+        if(level_ == 10)
+        {
+            NextNinthChordTarget();
+            return;
+        }
         unsigned second = 7;
         if(level_ == 3 || level_ == 6)
             second = 4;
@@ -399,6 +414,50 @@ class PitchQuiz
         target_notes_[1] = root + second;
         if(three_voices)
             target_notes_[2] = root + 7;
+    }
+
+    // Level 9: major/minor triads in root position, 1st or 2nd inversion,
+    // voiced compactly above the bass note. Widest voicing spans 9 semitones.
+    void NextInversionTarget()
+    {
+        const bool major = RandomBelow(2) == 0;
+        const unsigned third = major ? 4 : 3;
+        const unsigned inversion = RandomBelow(3);
+        const unsigned bass = 48 + RandomBelow(72 - 9 - 48 + 1);
+        target_notes_[0] = bass;
+        if(inversion == 0)
+        {
+            target_notes_[1] = bass + third;
+            target_notes_[2] = bass + 7;
+        }
+        else if(inversion == 1)
+        {
+            target_notes_[1] = bass + (7 - third);
+            target_notes_[2] = bass + (12 - third);
+        }
+        else
+        {
+            target_notes_[1] = bass + 5;
+            target_notes_[2] = bass + 5 + third;
+        }
+    }
+
+    // Level 10: real five-voice chords in root position, e.g. Dm9b5.
+    // The widest chord reaches a ninth (14 semitones) above the root.
+    void NextNinthChordTarget()
+    {
+        static constexpr uint8_t chord_offsets[5][4] = {
+            {4, 7, 11, 14},  // major 9
+            {3, 7, 10, 14},  // minor 9
+            {4, 7, 10, 14},  // dominant 9
+            {3, 6, 10, 14},  // minor 9 flat 5 (half-diminished 9)
+            {4, 7, 10, 13},  // dominant 7 flat 9
+        };
+        const unsigned chord = RandomBelow(5);
+        const unsigned root = 48 + RandomBelow(72 - 14 - 48 + 1);
+        target_notes_[0] = root;
+        for(unsigned voice = 1; voice < 5; ++voice)
+            target_notes_[voice] = root + chord_offsets[chord][voice - 1];
     }
 
     void Advance()
@@ -449,7 +508,7 @@ class PitchQuiz
     uint32_t random_ = 1;
     uint32_t progress_ = 0;
     unsigned completed_ = 0;
-    unsigned target_notes_[3] = {60, 60, 60};
+    unsigned target_notes_[5] = {60, 60, 60, 60, 60};
     unsigned target_index_ = 0;
     uint32_t pressed_chord_mask_ = 0;
     unsigned pressed_chord_count_ = 0;

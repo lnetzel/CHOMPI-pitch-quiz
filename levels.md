@@ -23,3 +23,5 @@ Chords mode (Switch down):
 |6|3|White + Black|Major chords triads|
 |7|3|White + Black|Minor chords triads|
 |8|3|White + Black|Major & Minor chords triads|
+|9|3|White + Black|Major & Minor chords triads in both 1st or 2nd inversions|
+|10|5|White + Black|Any real chord with up to 5 voices needed e.g Dm9♭5|

@@ -11,14 +11,14 @@ Listen to the sound, then press the button for the pitch you think you heard. Th
 The switch next to SHIFT selects the game mode. Flipping it stops the current round and returns to idle.
 
 - **Switch UP — Perfect Pitch**: single notes and note clusters over 10 levels. The PLAY LED pulses blue.
-- **Switch DOWN — Chords**: intervals and chords from music theory over 8 levels. The PLAY LED pulses green.
+- **Switch DOWN — Chords**: intervals and chords from music theory over 10 levels. The PLAY LED pulses green.
 
 ## Buttons
 
 - **Mode switch (next to SHIFT)**: UP = Perfect Pitch mode, DOWN = Chords mode
 - **Play/Pause**: Start the game. (hold to return to idle mode)
 - **LOOP**: replay the sound for the question during game
-- **SHIFT + Black Keys**: select level (1-10 in Perfect Pitch mode, 1-8 in Chords mode), will automatically start.
+- **SHIFT + Black Keys**: select level (1-10 in both modes), will automatically start.
 - **SHIFT + LOOP**: Trigger Reboot prompt, reboot with another SHIFT press
 - **Volume Encoder**: Set volume level
 
@@ -32,4 +32,4 @@ If you finish level 10 with no wrong answers, congratulations, you saved the pri
 
 ### Chords (switch down)
 
-Two or three notes sound together; press all of them. Levels 1-2 are perfect fifths, levels 3-5 are major and minor third intervals, and levels 6-8 are major and minor triads. Level 1 uses white-key roots only; all other levels use any root. See levels.md for the full level table.
+Two to five notes sound together; press all of them. Levels 1-2 are perfect fifths, levels 3-5 are major and minor third intervals, levels 6-8 are major and minor triads, level 9 mixes triads in root position, 1st and 2nd inversions, and level 10 is real five-note chords (e.g. Dm9b5). Level 1 uses white-key roots only; all other levels use any root. See levels.md for the full level table.
