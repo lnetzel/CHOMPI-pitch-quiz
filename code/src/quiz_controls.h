@@ -5,7 +5,7 @@
 namespace quiz_controls
 {
 static constexpr unsigned kShiftSwitch = 5;
-// SW_TOG next to SHIFT: down = Perfect Pitch mode, up = Chords mode.
+// SW_TOG next to SHIFT: up = Perfect Pitch mode, down = Chords mode.
 static constexpr unsigned kModeToggleSwitch = 6;
 static constexpr unsigned kPlaySwitch = 33;
 static constexpr unsigned kLoopSwitch = 34;

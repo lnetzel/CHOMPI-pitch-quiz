@@ -24,7 +24,7 @@ class PitchQuiz
 
     enum class State { Idle, Prompt, Listening, Answer, Feedback, Pause, LevelComplete };
     enum class Result { Pending, Correct, Wrong };
-    // PerfectPitch: toggle DOWN. Chords: toggle UP (intervals and triads).
+    // PerfectPitch: toggle UP. Chords: toggle DOWN (intervals and triads).
     enum class Mode { PerfectPitch, Chords };
 
     void Start(uint32_t seed)
