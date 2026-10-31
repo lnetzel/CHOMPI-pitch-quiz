@@ -1,4 +1,4 @@
-TARGET = CHOMPI_Pitch_Quiz_v1.0
+TARGET = CHOMPI_Pitch_Quiz_v2.0
 
 DEBUG = 0
 OPT = -O3
